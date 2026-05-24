@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { toTypedSchema } from '@vee-validate/zod'
-import { RefreshCw, ScanQrCode } from 'lucide-vue-next'
+import { ArrowRightLeft, RefreshCw, ScanQrCode } from 'lucide-vue-next'
 import { useForm } from 'vee-validate'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import * as z from 'zod'
 
+import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
-  DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -32,9 +31,11 @@ type InstallFormValues = {
 const props = withDefaults(
   defineProps<{
     isDiscovering?: boolean
+    allowTransfer?: boolean
   }>(),
   {
     isDiscovering: false,
+    allowTransfer: false,
   },
 )
 
@@ -45,6 +46,7 @@ const emit = defineEmits<{
     confirmationCode: string
   }): void
   (event: 'discover'): void
+  (event: 'transfer'): void
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
@@ -250,7 +252,7 @@ watch(scanOpen, (value) => {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-md">
+    <EsimPersistentDialogContent class="sm:max-w-md">
       <DialogHeader>
         <div class="flex items-center gap-2 pr-8">
           <DialogTitle>{{ t('modemDetail.esim.installTitle') }}</DialogTitle>
@@ -321,25 +323,43 @@ watch(scanOpen, (value) => {
           </FormItem>
         </FormField>
 
-        <DialogFooter class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Button type="submit" class="order-1 w-full sm:order-2" :disabled="isSubmitting">
+        <div class="space-y-4">
+          <Button type="submit" class="w-full" :disabled="isSubmitting">
             {{ t('modemDetail.esim.installConfirm') }}
           </Button>
+
+          <div v-if="props.allowTransfer" class="flex items-center gap-4 text-sm text-muted-foreground">
+            <span class="h-px flex-1 bg-border" />
+            <span>{{ t('modemDetail.esim.installOr') }}</span>
+            <span class="h-px flex-1 bg-border" />
+          </div>
+
+          <Button
+            v-if="props.allowTransfer"
+            variant="outline"
+            type="button"
+            class="w-full border-primary text-primary hover:text-primary"
+            @click="emit('transfer')"
+          >
+            <ArrowRightLeft class="size-3.5" />
+            {{ t('modemDetail.esim.transferButton') }}
+          </Button>
+
           <Button
             variant="ghost"
             type="button"
-            class="order-2 w-full sm:order-1"
+            class="w-full"
             @click="closeDialog"
           >
             {{ t('modemDetail.actions.cancel') }}
           </Button>
-        </DialogFooter>
+        </div>
       </form>
-    </DialogContent>
+    </EsimPersistentDialogContent>
   </Dialog>
 
   <Dialog v-model:open="scanOpen">
-    <DialogContent class="sm:max-w-md">
+    <EsimPersistentDialogContent class="sm:max-w-md">
       <DialogHeader>
         <DialogTitle>{{ t('modemDetail.esim.scanTitle') }}</DialogTitle>
       </DialogHeader>
@@ -367,6 +387,6 @@ watch(scanOpen, (value) => {
           {{ t('modemDetail.actions.cancel') }}
         </Button>
       </DialogFooter>
-    </DialogContent>
+    </EsimPersistentDialogContent>
   </Dialog>
 </template>

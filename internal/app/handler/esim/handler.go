@@ -14,7 +14,6 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
-	"github.com/damonto/sigmo/internal/pkg/carrier"
 	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
@@ -35,6 +34,7 @@ const (
 	errorCodeDiscoverESIMsFailed              = "discover_esims_failed"
 	errorCodeICCIDRequired                    = "iccid_required"
 	errorCodeInvalidICCID                     = "invalid_iccid"
+	errorCodeEnableESIMBusy                   = "esim_enable_busy"
 	errorCodeEnableESIMTimeout                = "esim_enable_timeout"
 	errorCodeEnableESIMFailed                 = "enable_esim_failed"
 	errorCodeESIMProfileNotFound              = "esim_profile_not_found"
@@ -49,6 +49,7 @@ const (
 var (
 	errICCIDRequired = errors.New("iccid is required")
 	errInvalidICCID  = errors.New("invalid iccid")
+	errEuiccBusy     = errors.New("eUICC is busy, retry later")
 )
 
 var wsUpgrader = websocket.Upgrader{
@@ -98,13 +99,13 @@ func (h *Handler) List(c *echo.Context) error {
 	return c.JSON(http.StatusOK, response)
 }
 
-func (h *Handler) Discover(c *echo.Context) error {
+func (h *Handler) Discovery(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeDiscoverESIMsFailed)
 	}
-	response, err := h.provisioning.Discover(ctx, modem)
+	response, err := h.provisioning.Discovery(ctx, modem)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
@@ -159,6 +160,9 @@ func enableError(c *echo.Context, err error) error {
 	}
 	if errors.Is(err, lpa.ErrNoSupportedAID) {
 		return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+	}
+	if errors.Is(err, sgp22.ErrCatBusy) {
+		return httpapi.Error(c, http.StatusConflict, errorCodeEnableESIMBusy, errEuiccBusy.Error())
 	}
 	if errors.Is(err, errProfileNotFound) {
 		return httpapi.BadRequest(c, errorCodeESIMProfileNotFound, err)
@@ -306,20 +310,4 @@ func readStartMessage(conn *websocket.Conn) (downloadClientMessage, error) {
 		return downloadClientMessage{}, errors.New("smdp is required")
 	}
 	return start, nil
-}
-
-func profilePreviewFrom(info *sgp22.ProfileInfo) downloadProfilePreview {
-	carrierInfo := carrier.Lookup(info.ProfileOwner.MCC() + info.ProfileOwner.MNC())
-	preview := downloadProfilePreview{
-		ICCID:               info.ICCID.String(),
-		ServiceProviderName: info.ServiceProviderName,
-		ProfileName:         info.ProfileName,
-		ProfileNickname:     info.ProfileNickname,
-		ProfileState:        info.ProfileState.String(),
-		RegionCode:          carrierInfo.Region,
-	}
-	if info.Icon.Valid() {
-		preview.Icon = fmt.Sprintf("data:%s;base64,%s", info.Icon.FileType(), info.Icon.String())
-	}
-	return preview
 }

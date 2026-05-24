@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"sync"
 
 	"github.com/damonto/euicc-go/apdu"
 	"github.com/damonto/euicc-go/bertlv"
@@ -23,14 +24,13 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-// gmu ensures that LPA instances for the same modem (keyed by EquipmentIdentifier)
-// cannot be created or operated on concurrently. This is necessary because eUICC does not
-// allow simultaneous operations on the same eUICC module.
+// gmu serializes LPA operations for the same modem or external reader. This is necessary
+// because eUICC operations cannot safely share one underlying smart-card channel.
 var gmu = keymutex.New()
 
 type LPA struct {
 	*lpa.Client
-	key string // EquipmentIdentifier used for global locking
+	lockKey string
 }
 
 type Info struct {
@@ -53,19 +53,81 @@ var AIDs = [][]byte{
 
 func New(m *modem.Modem, cfg *config.Config) (*LPA, error) {
 	gmu.Lock(m.EquipmentIdentifier)
-	instance := &LPA{key: m.EquipmentIdentifier}
-	ch, err := instance.createChannel(m)
+	ch, err := createChannel(m)
 	if err != nil {
 		gmu.Unlock(m.EquipmentIdentifier)
 		return nil, err
 	}
+	instance, err := newWithChannelLocked(m.EquipmentIdentifier, m.EquipmentIdentifier, ch, cfg)
+	if err != nil {
+		_ = ch.Disconnect()
+		gmu.Unlock(m.EquipmentIdentifier)
+		return nil, err
+	}
+	return instance, nil
+}
+
+func NewWithChannel(lockKey, configID string, ch apdu.SmartCardChannel, cfg *config.Config) (*LPA, error) {
+	if lockKey != "" {
+		gmu.Lock(lockKey)
+	}
+	instance, err := newWithChannelLocked(lockKey, configID, ch, cfg)
+	if err != nil {
+		if lockKey != "" {
+			gmu.Unlock(lockKey)
+		}
+		_ = ch.Disconnect()
+		return nil, err
+	}
+	return instance, nil
+}
+
+func NewChannel(m *modem.Modem) (apdu.SmartCardChannel, func(), error) {
+	gmu.Lock(m.EquipmentIdentifier)
+	ch, err := createChannel(m)
+	if err != nil {
+		gmu.Unlock(m.EquipmentIdentifier)
+		return nil, nil, err
+	}
+	locked := &lockedChannel{SmartCardChannel: ch, key: m.EquipmentIdentifier}
+	release := func() {
+		if err := locked.Disconnect(); err != nil {
+			slog.Debug("disconnect LPA channel", "error", err)
+		}
+	}
+	return locked, release, nil
+}
+
+type lockedChannel struct {
+	apdu.SmartCardChannel
+	key  string
+	once sync.Once
+}
+
+func (c *lockedChannel) Disconnect() error {
+	var err error
+	c.once.Do(func() {
+		err = c.SmartCardChannel.Disconnect()
+		gmu.Unlock(c.key)
+	})
+	return err
+}
+
+func (c *lockedChannel) CloseLogicalChannel(channel byte) error {
+	if err := c.SmartCardChannel.CloseLogicalChannel(channel); err != nil {
+		return errors.Join(err, c.Disconnect())
+	}
+	return nil
+}
+
+func newWithChannelLocked(lockKey, configID string, ch apdu.SmartCardChannel, cfg *config.Config) (*LPA, error) {
+	instance := &LPA{lockKey: lockKey}
 	opts := &lpa.Options{
 		Channel:              ch,
 		AdminProtocolVersion: "2.2.0",
-		MSS:                  cfg.FindModem(m.EquipmentIdentifier).MSS,
+		MSS:                  cfg.FindModem(configID).MSS,
 	}
 	if err := instance.tryCreateClient(opts); err != nil {
-		gmu.Unlock(m.EquipmentIdentifier)
 		return nil, err
 	}
 	return instance, nil
@@ -84,7 +146,7 @@ func (l *LPA) tryCreateClient(opts *lpa.Options) error {
 	return ErrNoSupportedAID
 }
 
-func (l *LPA) createChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
+func createChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
 	slot := uint8(1)
 	if m.PrimarySimSlot > 0 {
 		slot = uint8(m.PrimarySimSlot)
@@ -97,11 +159,11 @@ func (l *LPA) createChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
 		slog.Info("using MBIM driver", "port", m.PrimaryPort, "slot", slot)
 		return mbim.New(m.PrimaryPort, slot)
 	default:
-		return l.createATChannel(m)
+		return createATChannel(m)
 	}
 }
 
-func (l *LPA) createATChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
+func createATChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
 	port, err := m.Port(modem.ModemPortTypeAt)
 	if err != nil {
 		return nil, err
@@ -111,8 +173,11 @@ func (l *LPA) createATChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
 }
 
 func (l *LPA) Close() error {
-	gmu.Unlock(l.key)
-	return l.Client.Close()
+	err := l.Client.Close()
+	if l.lockKey != "" {
+		gmu.Unlock(l.lockKey)
+	}
+	return err
 }
 
 func (l *LPA) Info() (*Info, error) {
@@ -211,17 +276,19 @@ func (l *LPA) Download(ctx context.Context, activationCode *lpa.ActivationCode, 
 	return nil
 }
 
-func (l *LPA) Discover(imei sgp22.IMEI) ([]*sgp22.EventEntry, error) {
+func (l *LPA) Discovery(imei sgp22.IMEI) ([]*sgp22.EventEntry, error) {
 	var entries []*sgp22.EventEntry
+	var errs error
 	addresses := []url.URL{
 		{Scheme: "https", Host: "lpa.ds.gsma.com"},
 		{Scheme: "https", Host: "lpa.live.esimdiscovery.com"},
 	}
 	for _, address := range addresses {
 		slog.Info("discovering profiles", "address", address.Host)
-		discovered, err := l.Discovery(&address, imei)
+		discovered, err := l.Client.Discovery(&address, imei)
 		if err != nil {
-			return nil, err
+			errs = errors.Join(errs, fmt.Errorf("discover profiles from %s: %w", address.Host, err))
+			continue
 		}
 		for _, entry := range discovered {
 			if entry == nil {
@@ -229,6 +296,9 @@ func (l *LPA) Discover(imei sgp22.IMEI) ([]*sgp22.EventEntry, error) {
 			}
 			entries = append(entries, entry)
 		}
+	}
+	if len(entries) == 0 && errs != nil {
+		return nil, errs
 	}
 	return entries, nil
 }

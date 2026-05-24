@@ -16,6 +16,16 @@ export type EsimDiscoverItem = {
 
 export type EsimDiscoverResponse = EsimDiscoverItem[]
 
+export type EsimDownloadPreview = {
+  iccid: string
+  serviceProviderName: string
+  profileName: string
+  profileNickname?: string
+  profileState: string
+  icon?: string
+  regionCode?: string
+}
+
 export type EsimProfile = {
   id: string
   name: string
@@ -23,4 +33,31 @@ export type EsimProfile = {
   enabled: boolean
   regionCode: string
   logoUrl?: string
+}
+
+export type EsimTransferSource = {
+  type: 'modem' | 'ccid'
+  id: string
+  name: string
+  detail?: string
+  requiresSourceImei: boolean
+}
+
+export type EsimTransferSourcesResponse = {
+  sources: EsimTransferSource[]
+  ccidError?: string
+}
+
+export type EsimTransferProfile = {
+  id: string
+  type: 'esim' | 'physical'
+  name: string
+  serviceProviderName?: string
+  iccid: string
+  icon?: string
+  regionCode?: string
+  enabled: boolean
+  supported: boolean
+  unsupportedReason?: string
+  carrierName?: string
 }

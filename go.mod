@@ -2,6 +2,8 @@ module github.com/damonto/sigmo
 
 go 1.26.0
 
+replace github.com/damonto/euicc-go => ../euicc-go
+
 require (
 	github.com/damonto/euicc-go v1.1.2
 	github.com/go-playground/locales v0.14.1

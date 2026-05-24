@@ -42,7 +42,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { useEsimApi } from '@/apis/esim'
-import RegionFlag from '@/components/RegionFlag.vue'
+import EsimProfileAvatar from '@/components/esim/EsimProfileAvatar.vue'
 import type { EsimProfile } from '@/types/esim'
 
 const profiles = defineModel<EsimProfile[]>('profiles', { required: true })
@@ -269,17 +269,11 @@ watch(renameOpen, (value) => {
         :class="profile.enabled ? 'border-primary/40 bg-primary/5' : 'border-transparent'"
       >
         <div class="flex min-w-0 items-center gap-3">
-          <div
-            class="flex size-11 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30"
-          >
-            <img
-              v-if="profile.logoUrl"
-              :src="profile.logoUrl"
-              :alt="`${profile.name} logo`"
-              class="size-6 object-contain"
-            />
-            <RegionFlag v-else :region-code="profile.regionCode" class="rounded-sm text-[18px]" />
-          </div>
+          <EsimProfileAvatar
+            :name="profile.name"
+            :icon="profile.logoUrl"
+            :region-code="profile.regionCode"
+          />
           <div class="min-w-0">
             <p class="truncate text-sm font-semibold text-foreground">
               {{ profile.name }}

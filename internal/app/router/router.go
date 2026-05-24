@@ -9,6 +9,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	hauth "github.com/damonto/sigmo/internal/app/handler/auth"
+	"github.com/damonto/sigmo/internal/app/handler/capability"
 	hconfig "github.com/damonto/sigmo/internal/app/handler/config"
 	"github.com/damonto/sigmo/internal/app/handler/esim"
 	"github.com/damonto/sigmo/internal/app/handler/euicc"
@@ -45,6 +46,9 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 	}))
 
 	v1 := e.Group("/api/v1")
+
+	capabilityHandler := capability.New()
+	v1.GET("/capabilities", capabilityHandler.List)
 
 	authStore := auth.NewStore()
 	authHandler := hauth.New(cfg.Store, authStore)
@@ -107,8 +111,9 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 		{
 			h := esim.New(cfg.Store, cfg.Registry, cfg.Internet)
 			protected.GET("/modems/:id/esims", h.List)
-			protected.GET("/modems/:id/esims/discover", h.Discover)
+			protected.POST("/modems/:id/esim-discoveries", h.Discovery)
 			protected.GET("/modems/:id/esims/download-sessions", h.Download)
+			h.RegisterTransferRoutes(protected)
 			protected.PUT("/modems/:id/esims/:iccid/activation", h.Enable)
 			protected.PUT("/modems/:id/esims/:iccid/nickname", h.UpdateNickname)
 			protected.DELETE("/modems/:id/esims/:iccid", h.Delete)

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
 import RegionFlag from '@/components/RegionFlag.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -53,18 +53,18 @@ const handleOpenChange = (nextOpen: boolean) => {
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="sm:max-w-sm">
+    <EsimPersistentDialogContent class="sm:max-w-sm">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription>{{ hint }}</DialogDescription>
       </DialogHeader>
-      <Card class="border-0 shadow-sm">
+      <Card class="border-0 py-0 shadow-sm">
         <CardContent class="flex items-center gap-3 p-3">
           <div
             class="flex size-12 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30"
           >
             <img v-if="logoUrl" :src="logoUrl" class="size-7 object-contain" />
-            <RegionFlag v-else :region-code="regionCode" class="rounded-sm text-[18px]" />
+            <RegionFlag v-else :region-code="regionCode" class="rounded-sm text-base" />
           </div>
           <div class="min-w-0">
             <p class="truncate text-sm font-semibold text-foreground">{{ profileName }}</p>
@@ -73,11 +73,7 @@ const handleOpenChange = (nextOpen: boolean) => {
         </CardContent>
       </Card>
       <DialogFooter class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Button
-          type="button"
-          class="order-1 w-full sm:order-2"
-          @click="emit('confirm')"
-        >
+        <Button type="button" class="order-1 w-full sm:order-2" @click="emit('confirm')">
           {{ confirmLabel }}
         </Button>
         <Button
@@ -89,6 +85,6 @@ const handleOpenChange = (nextOpen: boolean) => {
           {{ cancelLabel }}
         </Button>
       </DialogFooter>
-    </DialogContent>
+    </EsimPersistentDialogContent>
   </Dialog>
 </template>

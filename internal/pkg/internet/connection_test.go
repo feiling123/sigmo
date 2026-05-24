@@ -46,7 +46,7 @@ func TestCurrentReturnsDefaultAPNCredentials(t *testing.T) {
 
 	modem := fakeInternetModem{
 		modemID:    "860588043408833",
-		operatorID: "23415",
+		operatorID: "23491",
 	}
 
 	stateDir := t.TempDir()
@@ -72,8 +72,8 @@ func TestCurrentReturnsDefaultAPNCredentials(t *testing.T) {
 	if got.IPType != "ipv4v6" {
 		t.Fatalf("Current() IPType = %q, want ipv4v6", got.IPType)
 	}
-	if got.APNUsername != "wap" || got.APNPassword != "*wap" || got.APNAuth != "pap" {
-		t.Fatalf("Current() credentials = %q/%q/%q, want wap/*wap/pap", got.APNUsername, got.APNPassword, got.APNAuth)
+	if got.APNUsername != "wap" || got.APNPassword != "wap" || got.APNAuth != "pap" {
+		t.Fatalf("Current() credentials = %q/%q/%q, want wap/wap/pap", got.APNUsername, got.APNPassword, got.APNAuth)
 	}
 }
 

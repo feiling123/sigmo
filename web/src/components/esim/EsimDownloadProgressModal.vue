@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -29,7 +29,7 @@ const progressValue = computed(() => Math.min(Math.max(props.progress, 0), 100))
 
 <template>
   <Dialog :open="props.open">
-    <DialogContent class="sm:max-w-sm">
+    <EsimPersistentDialogContent class="sm:max-w-sm" :show-close-button="false">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription>{{ stageLabel }}</DialogDescription>
@@ -40,6 +40,6 @@ const progressValue = computed(() => Math.min(Math.max(props.progress, 0), 100))
           {{ cancelLabel }}
         </Button>
       </DialogFooter>
-    </DialogContent>
+    </EsimPersistentDialogContent>
   </Dialog>
 </template>

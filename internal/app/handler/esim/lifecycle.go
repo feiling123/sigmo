@@ -17,12 +17,13 @@ import (
 )
 
 type lifecycle struct {
-	cfg             *config.Config
-	store           *config.Store
-	newClient       lifecycleClientFactory
-	findModem       func(context.Context, string) (*mmodem.Modem, error)
-	restartModem    func(context.Context, *mmodem.Modem, bool) error
-	confirmInterval time.Duration
+	cfg                *config.Config
+	store              *config.Store
+	newClient          lifecycleClientFactory
+	findModem          func(context.Context, string) (*mmodem.Modem, error)
+	waitForModemReload func(context.Context, *mmodem.Modem) (*mmodem.Modem, error)
+	restartModem       func(context.Context, *mmodem.Modem, bool) error
+	readyTimeout       time.Duration
 }
 
 type enableSession struct {
@@ -31,12 +32,6 @@ type enableSession struct {
 	iccid   sgp22.ICCID
 	client  lifecycleClient
 	lastSeq sgp22.SequenceNumber
-}
-
-type enableConfirmState struct {
-	reloadObserved     bool
-	modemUnavailable   bool
-	lastConfirmFailure error
 }
 
 type lifecycleClient interface {
@@ -52,21 +47,23 @@ type lifecycleClientFactory func(*mmodem.Modem, *config.Config) (lifecycleClient
 
 var (
 	errActiveProfileCannotDelete = errors.New("active profile cannot be deleted")
+	errModemRequired             = errors.New("modem is required")
 	errProfileNotFound           = errors.New("profile not found")
 	errProfileAlreadyActive      = errors.New("profile already active")
 )
 
-const enableConfirmInterval = time.Second
+const enableReadyTimeout = 30 * time.Second
 
 func newLifecycle(store *config.Store, registry *mmodem.Registry) *lifecycle {
 	return &lifecycle{
-		store:     store,
-		newClient: newLifecycleClient,
-		findModem: registry.Find,
+		store:              store,
+		newClient:          newLifecycleClient,
+		findModem:          registry.Find,
+		waitForModemReload: registry.WaitForReloadedModem,
 		restartModem: func(ctx context.Context, modem *mmodem.Modem, compatible bool) error {
 			return modem.Restart(ctx, compatible)
 		},
-		confirmInterval: enableConfirmInterval,
+		readyTimeout: enableReadyTimeout,
 	}
 }
 
@@ -141,19 +138,25 @@ func (s *enableSession) Enable(ctx context.Context) error {
 	defer s.Close()
 
 	if err := s.client.EnableProfile(s.iccid, true); err != nil {
-		return s.confirmEnableResult(ctx, fmt.Errorf("enable profile %s: %w", s.iccid.String(), err))
+		return fmt.Errorf("enable profile %s: %w", s.iccid.String(), err)
 	}
 
 	s.Close()
 
 	if err := s.l.restartModem(ctx, s.modem, s.l.findModemConfig(s.modem.EquipmentIdentifier).Compatible); err != nil {
 		slog.Warn("restart modem after enabling profile", "modem", s.modem.EquipmentIdentifier, "error", err)
-		return s.confirmEnableResult(ctx, err)
 	}
 
-	target, state, err := s.l.waitForEnabledProfile(ctx, s.modem.EquipmentIdentifier, s.iccid)
+	if err := s.finish(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *enableSession) finish(ctx context.Context) error {
+	target, err := s.l.waitForReadyModem(ctx, s.modem)
 	if err != nil {
-		return confirmEnabledProfileError(err, state)
+		return fmt.Errorf("wait for modem readiness: %w", err)
 	}
 	if err := s.l.sendPendingNotifications(target, s.lastSeq); err != nil {
 		slog.Warn("failed to handle modem notifications", "error", err, "modem", s.modem.EquipmentIdentifier)
@@ -161,96 +164,30 @@ func (s *enableSession) Enable(ctx context.Context) error {
 	return nil
 }
 
-func (s *enableSession) confirmEnableResult(ctx context.Context, cause error) error {
-	s.Close()
+func (l *lifecycle) waitForReadyModem(ctx context.Context, original *mmodem.Modem) (*mmodem.Modem, error) {
+	if original == nil {
+		return nil, errModemRequired
+	}
+	if modem, err := l.findModem(ctx, original.EquipmentIdentifier); err == nil {
+		return modem, nil
+	} else if !errors.Is(err, mmodem.ErrNotFound) {
+		return nil, fmt.Errorf("confirm modem availability: %w", err)
+	}
 
-	target, state, err := s.l.waitForEnabledProfile(ctx, s.modem.EquipmentIdentifier, s.iccid)
+	timeout := l.readyTimeout
+	if timeout <= 0 {
+		timeout = enableReadyTimeout
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if _, err := l.waitForModemReload(waitCtx, original); err != nil {
+		return nil, err
+	}
+	modem, err := l.findModem(ctx, original.EquipmentIdentifier)
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return err
-		}
-		if state.modemUnavailable && errors.Is(err, context.DeadlineExceeded) {
-			return confirmEnabledProfileError(err, state)
-		}
-		if state.lastConfirmFailure != nil {
-			slog.Warn(
-				"profile enable confirmation did not succeed",
-				"modem", s.modem.EquipmentIdentifier,
-				"error", state.lastConfirmFailure,
-			)
-		}
-		return cause
+		return nil, fmt.Errorf("confirm modem availability: %w", err)
 	}
-
-	if err := s.l.sendPendingNotifications(target, s.lastSeq); err != nil {
-		slog.Warn("failed to handle modem notifications", "error", err, "modem", s.modem.EquipmentIdentifier)
-	}
-	return nil
-}
-
-func confirmEnabledProfileError(err error, state enableConfirmState) error {
-	if state.lastConfirmFailure == nil {
-		return fmt.Errorf("confirm enabled profile: %w", err)
-	}
-	return fmt.Errorf("confirm enabled profile: %w: last confirmation: %v", err, state.lastConfirmFailure)
-}
-
-func (l *lifecycle) waitForEnabledProfile(ctx context.Context, modemID string, iccid sgp22.ICCID) (*mmodem.Modem, enableConfirmState, error) {
-	interval := l.confirmInterval
-	if interval <= 0 {
-		interval = enableConfirmInterval
-	}
-	var state enableConfirmState
-	wait := func() error {
-		timer := time.NewTimer(interval)
-		defer timer.Stop()
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			return nil
-		}
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, state, ctx.Err()
-		default:
-		}
-
-		modem, err := l.findModem(ctx, modemID)
-		if err != nil {
-			if errors.Is(err, mmodem.ErrNotFound) {
-				state.reloadObserved = true
-				state.modemUnavailable = true
-				state.lastConfirmFailure = err
-			} else {
-				state.modemUnavailable = false
-				state.lastConfirmFailure = fmt.Errorf("find modem: %w", err)
-			}
-			if err := wait(); err != nil {
-				return nil, state, err
-			}
-			continue
-		}
-		state.modemUnavailable = false
-
-		enabled, err := l.profileEnabled(modem, iccid)
-		if err != nil {
-			state.lastConfirmFailure = fmt.Errorf("read profile: %w", err)
-			if err := wait(); err != nil {
-				return nil, state, err
-			}
-			continue
-		}
-		if enabled {
-			return modem, state, nil
-		}
-		state.lastConfirmFailure = nil
-		if err := wait(); err != nil {
-			return nil, state, err
-		}
-	}
+	return modem, nil
 }
 
 func (s *enableSession) Close() {
@@ -287,25 +224,6 @@ func (l *lifecycle) Delete(modem *mmodem.Modem, iccid sgp22.ICCID) error {
 		return fmt.Errorf("delete profile %s: %w", iccid.String(), err)
 	}
 	return nil
-}
-
-func (l *lifecycle) profileEnabled(modem *mmodem.Modem, iccid sgp22.ICCID) (bool, error) {
-	cfg := l.configSnapshot()
-	client, err := l.newClient(modem, cfg)
-	if err != nil {
-		return false, fmt.Errorf("create LPA client: %w", err)
-	}
-	defer func() {
-		if cerr := client.Close(); cerr != nil {
-			slog.Debug("close LPA client after profile check", "error", cerr)
-		}
-	}()
-
-	profiles, err := client.ListProfile(iccid, nil)
-	if err != nil {
-		return false, fmt.Errorf("list profiles: %w", err)
-	}
-	return activeProfile(profiles, iccid), nil
 }
 
 func activeProfile(profiles []*sgp22.ProfileInfo, iccid sgp22.ICCID) bool {

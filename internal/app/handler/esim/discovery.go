@@ -20,7 +20,7 @@ func newProvisioning(store *config.Store) *provisioning {
 	return &provisioning{store: store}
 }
 
-func (p *provisioning) Discover(ctx context.Context, modem *mmodem.Modem) ([]DiscoverResponse, error) {
+func (p *provisioning) Discovery(ctx context.Context, modem *mmodem.Modem) ([]DiscoverResponse, error) {
 	cfg := p.store.Snapshot()
 	client, err := lpa.New(modem, &cfg)
 	if err != nil {
@@ -41,7 +41,7 @@ func (p *provisioning) Discover(ctx context.Context, modem *mmodem.Modem) ([]Dis
 		return nil, fmt.Errorf("parse modem IMEI %s: %w", imeiValue, err)
 	}
 
-	entries, err := client.Discover(imei)
+	entries, err := client.Discovery(imei)
 	if err != nil {
 		return nil, fmt.Errorf("discover profiles: %w", err)
 	}

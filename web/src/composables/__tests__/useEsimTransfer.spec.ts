@@ -1,0 +1,157 @@
+import { ref } from 'vue'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { useEsimTransfer } from '@/composables/useEsimTransfer'
+import { TRANSFER_CLIENT_ERROR, TRANSFER_MESSAGE, TRANSFER_STATE } from '@/constants/esimTransfer'
+
+const api = vi.hoisted(() => ({
+  getTransferSources: vi.fn(),
+  getTransferProfiles: vi.fn(),
+}))
+
+vi.mock('@/apis/esim', () => ({
+  useEsimApi: () => api,
+}))
+
+class FakeWebSocket {
+  static OPEN = 1
+  static instances: FakeWebSocket[] = []
+
+  readyState = FakeWebSocket.OPEN
+  sent: string[] = []
+  onopen: (() => void) | null = null
+  onmessage: ((event: MessageEvent<string>) => void) | null = null
+  onerror: (() => void) | null = null
+  onclose: (() => void) | null = null
+
+  constructor(readonly url: string) {
+    FakeWebSocket.instances.push(this)
+  }
+
+  send(message: string) {
+    this.sent.push(message)
+  }
+
+  close() {
+    this.readyState = 3
+  }
+
+  message(payload: unknown) {
+    const data = typeof payload === 'string' ? payload : JSON.stringify(payload)
+    this.onmessage?.({ data } as MessageEvent<string>)
+  }
+}
+
+describe('useEsimTransfer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    FakeWebSocket.instances = []
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+  })
+
+  it('records the preview profile and completes the transfer progress', () => {
+    const onCompleted = vi.fn()
+    const transfer = useEsimTransfer(ref('modem-1'), { onCompleted })
+
+    transfer.selectedSource.value = {
+      type: 'modem',
+      id: 'source-1',
+      name: 'Source',
+      requiresSourceImei: false,
+    }
+    transfer.selectedProfile.value = {
+      id: 'profile-1',
+      type: 'esim',
+      name: 'Source line',
+      iccid: '8901',
+      enabled: true,
+      supported: true,
+    }
+
+    transfer.startTransfer()
+    const ws = FakeWebSocket.instances[0]
+    expect(ws).toBeDefined()
+    if (!ws) return
+    ws.onopen?.()
+
+    expect(JSON.parse(ws.sent[0] ?? '{}')).toMatchObject({
+      type: TRANSFER_MESSAGE.start,
+      sourceType: 'modem',
+      sourceId: 'source-1',
+      profileId: 'profile-1',
+    })
+
+    ws.message({
+      type: TRANSFER_MESSAGE.preview,
+      profile: {
+        iccid: '8902',
+        serviceProviderName: 'Carrier',
+        profileName: 'Transferred line',
+        profileState: 'disabled',
+      },
+    })
+    ws.message({ type: TRANSFER_MESSAGE.completed })
+
+    expect(transfer.state.value).toBe(TRANSFER_STATE.completed)
+    expect(transfer.previewProfile.value?.profileName).toBe('Transferred line')
+    expect(transfer.downloadedName.value).toBe('Transferred line')
+    expect(transfer.progress.value).toBe(100)
+    expect(onCompleted).toHaveBeenCalledOnce()
+  })
+
+  it('enters an error state for malformed websocket messages', () => {
+    const transfer = useEsimTransfer(ref('modem-1'))
+
+    transfer.selectedSource.value = {
+      type: 'modem',
+      id: 'source-1',
+      name: 'Source',
+      requiresSourceImei: false,
+    }
+    transfer.selectedProfile.value = {
+      id: 'profile-1',
+      type: 'esim',
+      name: 'Source line',
+      iccid: '8901',
+      enabled: true,
+      supported: true,
+    }
+
+    transfer.startTransfer()
+    const ws = FakeWebSocket.instances[0]
+    expect(ws).toBeDefined()
+    if (!ws) return
+    ws.message('{')
+
+    expect(transfer.state.value).toBe(TRANSFER_STATE.error)
+    expect(transfer.errorMessage.value).toBe(TRANSFER_CLIENT_ERROR.invalidResponse)
+  })
+
+  it('enters an error state for unknown websocket message types', () => {
+    const transfer = useEsimTransfer(ref('modem-1'))
+
+    transfer.selectedSource.value = {
+      type: 'modem',
+      id: 'source-1',
+      name: 'Source',
+      requiresSourceImei: false,
+    }
+    transfer.selectedProfile.value = {
+      id: 'profile-1',
+      type: 'esim',
+      name: 'Source line',
+      iccid: '8901',
+      enabled: true,
+      supported: true,
+    }
+
+    transfer.startTransfer()
+    const ws = FakeWebSocket.instances[0]
+    expect(ws).toBeDefined()
+    if (!ws) return
+    ws.message({ type: 'future_message' })
+
+    expect(transfer.state.value).toBe(TRANSFER_STATE.error)
+    expect(transfer.errorMessage.value).toBe(TRANSFER_CLIENT_ERROR.invalidResponse)
+  })
+})

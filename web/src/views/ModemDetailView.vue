@@ -13,12 +13,14 @@ import EsimDownloadResultModal from '@/components/esim/EsimDownloadResultModal.v
 import EsimInstallDialog from '@/components/esim/EsimInstallDialog.vue'
 import EsimProfileSection from '@/components/esim/EsimProfileSection.vue'
 import EsimSummaryCard from '@/components/esim/EsimSummaryCard.vue'
+import EsimTransferDialog from '@/components/esim/EsimTransferDialog.vue'
 import DraggableFab from '@/components/fab/DraggableFab.vue'
 import ModemDetailCard from '@/components/modem/ModemDetailCard.vue'
 import ModemDetailHeader from '@/components/modem/ModemDetailHeader.vue'
 import SimSlotSwitcher from '@/components/modem/SimSlotSwitcher.vue'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useEsimDiscover } from '@/composables/useEsimDiscover'
 import { useEsimDownload } from '@/composables/useEsimDownload'
 import { useModemDetail } from '@/composables/useModemDetail'
@@ -26,8 +28,10 @@ import { useSimSlotSwitch } from '@/composables/useSimSlotSwitch'
 
 const route = useRoute()
 const { t } = useI18n()
+const { hasFeature, fetchCapabilities } = useCapabilities()
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
+const canTransferEsim = computed(() => hasFeature(FEATURE.esimTransfer))
 const {
   modem,
   euicc,
@@ -43,6 +47,7 @@ const {
 const installDialogRef = ref<{ applyDiscoverAddress: (address: string) => void } | null>(null)
 
 const installDialogOpen = ref(false)
+const transferDialogOpen = ref(false)
 const detailDialogOpen = ref(false)
 const confirmationCode = ref('')
 const resultState = ref<'completed' | 'error' | null>(null)
@@ -197,6 +202,15 @@ const handlePreviewCancel = () => {
 const handleResultConfirm = () => {
   closeDialog()
 }
+
+const openTransferDialog = () => {
+  if (!canTransferEsim.value) return
+
+  installDialogOpen.value = false
+  transferDialogOpen.value = true
+}
+
+void fetchCapabilities()
 </script>
 
 <template>
@@ -248,7 +262,7 @@ const handleResultConfirm = () => {
       <DialogHeader>
         <DialogTitle>{{ t('modemDetail.tabs.detail') }}</DialogTitle>
       </DialogHeader>
-      <ScrollArea class="max-h-[70vh] pr-2">
+      <ScrollArea class="pr-2 [&_[data-slot=scroll-area-viewport]]:max-h-[70vh]">
         <ModemDetailCard :modem="modem" :euicc="euicc" />
       </ScrollArea>
     </DialogContent>
@@ -267,8 +281,17 @@ const handleResultConfirm = () => {
     ref="installDialogRef"
     v-model:open="installDialogOpen"
     :is-discovering="isDiscoverLoading"
+    :allow-transfer="canTransferEsim"
     @confirm="startDownload"
     @discover="openDiscoverDialog"
+    @transfer="openTransferDialog"
+  />
+
+  <EsimTransferDialog
+    v-if="canTransferEsim"
+    v-model:open="transferDialogOpen"
+    :modem-id="modemId"
+    @completed="fetchEsimProfiles(modemId)"
   />
 
   <EsimDiscoverDialog

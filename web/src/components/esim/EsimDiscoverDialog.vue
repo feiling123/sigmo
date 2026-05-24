@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 
+import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -34,7 +34,7 @@ const { t } = useI18n()
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-lg">
+    <EsimPersistentDialogContent class="sm:max-w-lg">
       <DialogHeader>
         <DialogTitle>{{ t('modemDetail.esim.discoverTitle') }}</DialogTitle>
         <DialogDescription>
@@ -42,7 +42,7 @@ const { t } = useI18n()
         </DialogDescription>
       </DialogHeader>
 
-      <ScrollArea class="max-h-[60vh] pr-1">
+      <ScrollArea class="pr-1 [&_[data-slot=scroll-area-viewport]]:max-h-[60vh]">
         <div v-if="props.isLoading" class="flex items-center justify-center py-10">
           <Spinner class="size-6 text-muted-foreground" />
           <span class="sr-only">{{ t('modemDetail.actions.loading') }}</span>
@@ -90,6 +90,6 @@ const { t } = useI18n()
           {{ t('modemDetail.esim.discoverConfirm') }}
         </Button>
       </DialogFooter>
-    </DialogContent>
+    </EsimPersistentDialogContent>
   </Dialog>
 </template>

@@ -1,14 +1,12 @@
 package esim
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
 	"unicode/utf8"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
-	"github.com/damonto/sigmo/internal/pkg/carrier"
 	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -43,23 +41,13 @@ func (p *profile) List(modem *mmodem.Modem) ([]ProfileResponse, error) {
 
 	response := make([]ProfileResponse, 0, len(profiles))
 	for _, item := range profiles {
-		name := item.ProfileNickname
-		if name == "" {
-			name = item.ProfileName
-		}
-		carrierInfo := carrier.Lookup(item.ProfileOwner.MCC() + item.ProfileOwner.MNC())
-		icon := ""
-		if fileType := item.Icon.FileType(); fileType != "" {
-			icon = fmt.Sprintf("data:%s;base64,%s", fileType, base64.StdEncoding.EncodeToString(item.Icon))
-		}
-		regionCode := carrierInfo.Region
 		response = append(response, ProfileResponse{
-			Name:                name,
+			Name:                profileDisplayName(item),
 			ServiceProviderName: item.ServiceProviderName,
 			ICCID:               item.ICCID.String(),
-			Icon:                icon,
+			Icon:                profileIconDataURL(item.Icon),
 			ProfileState:        uint8(item.ProfileState),
-			RegionCode:          regionCode,
+			RegionCode:          profileRegion(item),
 		})
 	}
 	return response, nil

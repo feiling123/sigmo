@@ -1,4 +1,5 @@
 export * from './config'
+export * from './capability'
 export * from './esim'
 export * from './euicc'
 export * from './internet'

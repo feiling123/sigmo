@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+
+	sgp22 "github.com/damonto/euicc-go/v2"
 )
 
 func TestEnablePrepareError(t *testing.T) {
@@ -82,6 +84,12 @@ func TestEnableError(t *testing.T) {
 			err:        errors.New("enable failed"),
 			wantStatus: http.StatusInternalServerError,
 			wantBody:   errorCodeEnableESIMFailed,
+		},
+		{
+			name:       "cat busy maps to conflict",
+			err:        sgp22.ErrCatBusy,
+			wantStatus: http.StatusConflict,
+			wantBody:   errorCodeEnableESIMBusy,
 		},
 	}
 

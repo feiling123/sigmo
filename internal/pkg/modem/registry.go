@@ -312,15 +312,26 @@ func (m *Registry) Close() error {
 }
 
 func (m *Registry) WaitForModem(ctx context.Context, current *Modem) (*Modem, error) {
-	return m.WaitForModemAfter(ctx, current, nil)
+	return m.waitForModemAfter(ctx, current, nil, false)
+}
+
+func (m *Registry) WaitForReloadedModem(ctx context.Context, current *Modem) (*Modem, error) {
+	return m.waitForModemAfter(ctx, current, nil, true)
 }
 
 func (m *Registry) WaitForModemAfter(ctx context.Context, current *Modem, action func() error) (*Modem, error) {
+	return m.waitForModemAfter(ctx, current, action, false)
+}
+
+func (m *Registry) waitForModemAfter(ctx context.Context, current *Modem, action func() error, reloadObserved bool) (*Modem, error) {
 	if current == nil {
 		return nil, errModemRequired
 	}
 	ready := make(chan *Modem, 1)
 	reload := newModemReloadState()
+	if reloadObserved {
+		reload.mark()
+	}
 	notify := func(event ModemEvent) error {
 		switch event.Type {
 		case ModemEventRemoved:

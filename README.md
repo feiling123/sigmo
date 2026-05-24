@@ -283,7 +283,60 @@ If you wish to contribute or modify the source:
 
     _Or for frontend hot-reload:_ `cd web && bun run dev`
 
-5.  **Build Docker Image**:
+5.  **Private feature build**:
+
+    The public module does not build eSIM Transfer by default. Private builds use
+    `go.private.mod` and download the private TS.43 module through normal Go module auth:
+
+    ```bash
+    export GOPRIVATE=github.com/damonto/*
+    source scripts/private-features.env
+    go run -tags="${PRIVATE_GO_TAGS}" -modfile="${PRIVATE_GO_MODFILE}" . -config config.toml
+    ```
+
+    To use SSH for private modules locally:
+
+    ```bash
+    export GOPRIVATE=github.com/damonto/*
+    git config --global url."git@github.com:damonto/".insteadOf "https://github.com/damonto/"
+    source scripts/private-features.env
+    go build -tags="${PRIVATE_GO_TAGS}" -modfile="${PRIVATE_GO_MODFILE}" -o sigmo .
+    sudo ./sigmo -config configs/config.toml
+    ```
+
+    Prefer building as your normal user and running the binary with `sudo`.
+    Running `sudo go run` makes Go and Git use root's module cache and Git/SSH
+    configuration, which is why it may prompt for a GitHub username.
+
+    This repository also includes a local helper that uses
+    `/home/user/.ssh/id_ed25519` over SSH, builds with your normal user's Go
+    cache, and starts the temporary `go run` binary with `sudo`:
+
+    ```bash
+    ./scripts/dev.sh
+    ```
+
+    Use the private tags and modfile from `scripts/private-features.env` for private
+    builds and tests. Future private features should use their own build tag and
+    register a capability so the frontend can discover them from
+    `/api/v1/capabilities`.
+
+    GitHub Actions enables private features only when the repository variable
+    `SIGMO_PRIVATE_FEATURES` is set to `true`. Private Go module access uses the
+    repository secret `SIGMO_PRIVATE_MODULE_TOKEN`.
+
+    Pull requests from branches in this repository that update `go.mod` or
+    `go.sum` automatically sync `go.private.mod` and `go.private.sum` when
+    private features are enabled. Fork pull requests are skipped so private
+    module credentials are not exposed.
+
+    To sync the private manifest locally after changing public dependencies:
+
+    ```bash
+    ./scripts/sync-private-go-mod.sh
+    ```
+
+6.  **Build Docker Image**:
     ```bash
     docker build -t sigmo:local .
     ```

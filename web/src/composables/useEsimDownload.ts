@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, ref, type Ref } from 'vue'
 
 import { getStoredToken } from '@/lib/auth-storage'
+import type { EsimDownloadPreview } from '@/types/esim'
 
 export type EsimDownloadState =
   | 'idle'
@@ -12,16 +13,6 @@ export type EsimDownloadState =
   | 'error'
 
 export type EsimDownloadStage = 'initializing' | 'connecting' | 'installing' | ''
-
-export type EsimDownloadPreview = {
-  iccid: string
-  serviceProviderName: string
-  profileName: string
-  profileNickname?: string
-  profileState: string
-  icon?: string
-  regionCode?: string
-}
 
 type InstallPayload = {
   smdp: string

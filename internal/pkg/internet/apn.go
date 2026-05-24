@@ -1,33 +1,25 @@
 package internet
 
-//go:generate sh -c "curl -fsSL https://android.googlesource.com/device/sample/+/main/etc/apns-full-conf.xml?format=TEXT | base64 -d > apn.xml"
-
 import (
 	_ "embed"
-	"encoding/xml"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
 
-//go:embed apn.xml
-var apnXML []byte
+//go:embed apns.json
+var apnJSON []byte
 
-var defaultAPNs = mustDefaultAPNs(apnXML)
-
-type apnDocument struct {
-	XMLName xml.Name   `xml:"apns"`
-	APNs    []apnEntry `xml:"apn"`
-}
+var defaultAPNs = mustDefaultAPNs(apnJSON)
 
 type apnEntry struct {
-	MCC      string `xml:"mcc,attr"`
-	MNC      string `xml:"mnc,attr"`
-	APN      string `xml:"apn,attr"`
-	Type     string `xml:"type,attr"`
-	Protocol string `xml:"protocol,attr"`
-	User     string `xml:"user,attr"`
-	Password string `xml:"password,attr"`
-	AuthType string `xml:"authtype,attr"`
+	MCC      string `json:"mcc"`
+	MNC      string `json:"mnc"`
+	APN      string `json:"apn"`
+	Protocol string `json:"protocol"`
+	User     string `json:"user"`
+	Password string `json:"pass"`
+	AuthType *int   `json:"authType"`
 }
 
 type apnProfile struct {
@@ -47,26 +39,28 @@ type apnSelection struct {
 }
 
 func mustDefaultAPNs(data []byte) map[string]apnProfile {
-	apns, err := defaultAPNsFromXML(data)
+	apns, err := defaultAPNsFromJSON(data)
 	if err != nil {
 		panic(err)
 	}
 	return apns
 }
 
-func defaultAPNsFromXML(data []byte) (map[string]apnProfile, error) {
-	var document apnDocument
-	if err := xml.Unmarshal(data, &document); err != nil {
-		return nil, fmt.Errorf("parse apn xml: %w", err)
+func defaultAPNsFromJSON(data []byte) (map[string]apnProfile, error) {
+	var entries []apnEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("parse apn json: %w", err)
 	}
 
 	apns := make(map[string]apnProfile)
-	for _, entry := range document.APNs {
+	for _, entry := range entries {
 		apn := strings.TrimSpace(entry.APN)
-		operatorIdentifier := strings.TrimSpace(entry.MCC) + strings.TrimSpace(entry.MNC)
-		if apn == "" || operatorIdentifier == "" || !hasAPNType(entry.Type, "default") {
+		mcc := strings.TrimSpace(entry.MCC)
+		mnc := strings.TrimSpace(entry.MNC)
+		if apn == "" || mcc == "" || mnc == "" {
 			continue
 		}
+		operatorIdentifier := mcc + mnc
 		if _, exists := apns[operatorIdentifier]; exists {
 			continue
 		}
@@ -123,24 +117,18 @@ func firstAPN(values ...string) string {
 	return ""
 }
 
-func hasAPNType(value, want string) bool {
-	for apnType := range strings.SplitSeq(value, ",") {
-		if strings.TrimSpace(apnType) == want {
-			return true
-		}
+func androidAuthType(value *int) string {
+	if value == nil {
+		return ""
 	}
-	return false
-}
-
-func androidAuthType(value string) string {
-	switch strings.TrimSpace(value) {
-	case "0":
+	switch *value {
+	case 0:
 		return "none"
-	case "1":
+	case 1:
 		return "pap"
-	case "2":
+	case 2:
 		return "chap"
-	case "3":
+	case 3:
 		return "pap|chap"
 	default:
 		return ""

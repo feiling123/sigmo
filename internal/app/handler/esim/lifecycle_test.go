@@ -86,68 +86,48 @@ func TestEnableSessionEnable(t *testing.T) {
 		enableErr         error
 		restartErr        error
 		findResults       []findResult
-		profileClients    []lifecycleClient
-		ctxTimeout        time.Duration
 		wantErr           error
 		wantRestart       bool
 		wantEnableClosed  bool
 		wantNotifications bool
+		wantWaitForModem  bool
 		wantFindCalls     int
 	}{
 		{
 			name:              "enable succeeds",
 			findResults:       []findResult{{modem: current}},
-			profileClients:    []lifecycleClient{&fakeLifecycleClient{profiles: enabledProfiles(iccid)}},
 			wantRestart:       true,
 			wantEnableClosed:  true,
 			wantNotifications: true,
 			wantFindCalls:     1,
 		},
 		{
-			name:              "restart error succeeds when enabled profile is confirmed",
-			restartErr:        errors.New("qmicli power off failed"),
-			findResults:       []findResult{{err: mmodem.ErrNotFound}, {modem: reloadedModem}},
-			profileClients:    []lifecycleClient{&fakeLifecycleClient{profiles: enabledProfiles(iccid)}},
+			name: "enable succeeds after final modem availability wait",
+			findResults: []findResult{
+				{err: mmodem.ErrNotFound},
+				{modem: reloadedModem},
+			},
 			wantRestart:       true,
 			wantEnableClosed:  true,
 			wantNotifications: true,
+			wantWaitForModem:  true,
 			wantFindCalls:     2,
 		},
 		{
-			name:              "enable error succeeds without modem reload when profile becomes active",
-			enableErr:         enableErr,
-			findResults:       []findResult{{modem: current}},
-			profileClients:    []lifecycleClient{&fakeLifecycleClient{profiles: enabledProfiles(iccid)}},
+			name:              "restart error succeeds when modem is ready",
+			restartErr:        errors.New("qmicli power off failed"),
+			findResults:       []findResult{{err: mmodem.ErrNotFound}, {modem: reloadedModem}},
+			wantRestart:       true,
 			wantEnableClosed:  true,
 			wantNotifications: true,
-			wantFindCalls:     1,
+			wantWaitForModem:  true,
+			wantFindCalls:     2,
 		},
 		{
-			name:              "enable error succeeds after slow modem re-enumeration",
-			enableErr:         enableErr,
-			findResults:       []findResult{{err: mmodem.ErrNotFound}, {err: mmodem.ErrNotFound}, {modem: reloadedModem}},
-			profileClients:    []lifecycleClient{&fakeLifecycleClient{profiles: enabledProfiles(iccid)}},
-			wantEnableClosed:  true,
-			wantNotifications: true,
-			wantFindCalls:     3,
-		},
-		{
-			name:             "enable error returns original error when profile remains disabled and modem stays present",
+			name:             "enable error returns original error immediately",
 			enableErr:        enableErr,
-			findResults:      []findResult{{modem: current}},
-			ctxTimeout:       time.Millisecond,
 			wantErr:          enableErr,
 			wantEnableClosed: true,
-			wantFindCalls:    1,
-		},
-		{
-			name:             "enable error returns timeout while modem remains unavailable",
-			enableErr:        enableErr,
-			findResults:      []findResult{{err: mmodem.ErrNotFound}},
-			ctxTimeout:       time.Millisecond,
-			wantErr:          context.DeadlineExceeded,
-			wantEnableClosed: true,
-			wantFindCalls:    1,
 		},
 	}
 
@@ -160,15 +140,15 @@ func TestEnableSessionEnable(t *testing.T) {
 				},
 			}
 			factoryClients := []lifecycleClient{notificationClient}
-			factoryClients = append(append([]lifecycleClient(nil), tt.profileClients...), factoryClients...)
 
 			var (
-				restartCalled bool
-				findCalls     int
+				restartCalled      bool
+				findCalls          int
+				waitForModemCalled bool
 			)
 			l := &lifecycle{
-				cfg:             &config.Config{},
-				confirmInterval: time.Microsecond,
+				cfg:          &config.Config{},
+				readyTimeout: time.Millisecond,
 				newClient: func(*mmodem.Modem, *config.Config) (lifecycleClient, error) {
 					if len(factoryClients) == 0 {
 						return &fakeLifecycleClient{profiles: disabledProfiles(iccid)}, nil
@@ -192,6 +172,16 @@ func TestEnableSessionEnable(t *testing.T) {
 					result := tt.findResults[index]
 					return result.modem, result.err
 				},
+				waitForModemReload: func(ctx context.Context, modem *mmodem.Modem) (*mmodem.Modem, error) {
+					if ctx == nil {
+						t.Fatal("ctx is nil")
+					}
+					if modem == nil {
+						t.Fatal("modem is nil")
+					}
+					waitForModemCalled = true
+					return reloadedModem, nil
+				},
 				restartModem: func(ctx context.Context, modem *mmodem.Modem, compatible bool) error {
 					if ctx == nil {
 						t.Fatal("ctx is nil")
@@ -212,14 +202,7 @@ func TestEnableSessionEnable(t *testing.T) {
 				lastSeq: 1,
 			}
 
-			ctx := context.Background()
-			var cancel context.CancelFunc
-			if tt.ctxTimeout > 0 {
-				ctx, cancel = context.WithTimeout(ctx, tt.ctxTimeout)
-				defer cancel()
-			}
-
-			err := session.Enable(ctx)
+			err := session.Enable(context.Background())
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("Enable() error = %v, want %v", err, tt.wantErr)
@@ -236,8 +219,14 @@ func TestEnableSessionEnable(t *testing.T) {
 			if enableClient.closed != tt.wantEnableClosed {
 				t.Fatalf("enable client closed = %v, want %v", enableClient.closed, tt.wantEnableClosed)
 			}
+			if !enableClient.enableRefresh {
+				t.Fatal("enable refresh = false, want true")
+			}
 			if tt.wantNotifications && notificationClient.sentNotifications != 1 {
 				t.Fatalf("sent notifications = %d, want 1", notificationClient.sentNotifications)
+			}
+			if waitForModemCalled != tt.wantWaitForModem {
+				t.Fatalf("wait for modem called = %v, want %v", waitForModemCalled, tt.wantWaitForModem)
 			}
 		})
 	}
@@ -257,6 +246,7 @@ type fakeLifecycleClient struct {
 	deleteErr           error
 	sendErr             error
 	closed              bool
+	enableRefresh       bool
 	sentNotifications   int
 }
 
@@ -268,7 +258,8 @@ func (f *fakeLifecycleClient) ListNotification(...sgp22.NotificationEvent) ([]*s
 	return f.notifications, f.listNotificationErr
 }
 
-func (f *fakeLifecycleClient) EnableProfile(any, bool) error {
+func (f *fakeLifecycleClient) EnableProfile(_ any, refresh bool) error {
+	f.enableRefresh = refresh
 	return f.enableErr
 }
 

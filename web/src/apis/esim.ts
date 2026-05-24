@@ -1,6 +1,11 @@
 import { useFetch } from '@/lib/fetch'
 
-import type { EsimDiscoverResponse, EsimProfilesResponse } from '@/types/esim'
+import type {
+  EsimDiscoverResponse,
+  EsimProfilesResponse,
+  EsimTransferProfile,
+  EsimTransferSourcesResponse,
+} from '@/types/esim'
 
 export const useEsimApi = () => {
   const getEsims = (id: string) => {
@@ -8,7 +13,9 @@ export const useEsimApi = () => {
   }
 
   const discoverEsims = (id: string) => {
-    return useFetch<EsimDiscoverResponse>(`modems/${id}/esims/discover`).get().json()
+    return useFetch<EsimDiscoverResponse>(`modems/${id}/esim-discoveries`, {
+      method: 'POST',
+    }).json()
   }
 
   const updateEsimNickname = (id: string, iccid: string, nickname: string) => {
@@ -30,11 +37,27 @@ export const useEsimApi = () => {
     }).json()
   }
 
+  const getTransferSources = (id: string) => {
+    return useFetch<EsimTransferSourcesResponse>(`modems/${id}/esim-transfer-sources`).get().json()
+  }
+
+  const getTransferProfiles = (
+    id: string,
+    payload: { sourceType: string; sourceId: string; sourceImei?: string },
+  ) => {
+    return useFetch<EsimTransferProfile[]>(`modems/${id}/esim-transfer-profile-queries`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }).json()
+  }
+
   return {
     getEsims,
     discoverEsims,
     updateEsimNickname,
     enableEsim,
     deleteEsim,
+    getTransferSources,
+    getTransferProfiles,
   }
 }

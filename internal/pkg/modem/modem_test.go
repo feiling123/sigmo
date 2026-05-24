@@ -459,6 +459,35 @@ func TestWaitForModem(t *testing.T) {
 	}
 }
 
+func TestWaitForReloadedModemReturnsSamePathReplacement(t *testing.T) {
+	withWaitForModemRefreshInterval(t, time.Microsecond)
+
+	current := &Modem{
+		objectPath:          "/org/freedesktop/ModemManager1/Modem/1",
+		EquipmentIdentifier: "354015820228039",
+	}
+	replacement := &Modem{
+		objectPath:          current.objectPath,
+		EquipmentIdentifier: current.EquipmentIdentifier,
+	}
+	registry := &Registry{
+		modems: map[dbus.ObjectPath]*Modem{
+			replacement.objectPath: replacement,
+		},
+		subscribed: true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	modem, err := registry.WaitForReloadedModem(ctx, current)
+	if err != nil {
+		t.Fatalf("WaitForReloadedModem() error = %v", err)
+	}
+	if modem != replacement {
+		t.Fatalf("WaitForReloadedModem() = %p, want %p", modem, replacement)
+	}
+}
+
 func withWaitForModemRefreshInterval(t *testing.T, interval time.Duration) {
 	t.Helper()
 	original := waitForModemRefreshInterval

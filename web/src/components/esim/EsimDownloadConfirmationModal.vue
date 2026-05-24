@@ -5,10 +5,10 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 
+import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -92,7 +92,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="sm:max-w-sm">
+    <EsimPersistentDialogContent class="sm:max-w-sm">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription>{{ hint }}</DialogDescription>
@@ -126,6 +126,6 @@ watch(
           </Button>
         </DialogFooter>
       </form>
-    </DialogContent>
+    </EsimPersistentDialogContent>
   </Dialog>
 </template>

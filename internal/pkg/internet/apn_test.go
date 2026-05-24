@@ -7,34 +7,44 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-func TestDefaultAPNsFromXML(t *testing.T) {
+func TestDefaultAPNsFromJSON(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
-		xml  string
+		json string
 		want map[string]apnProfile
 	}{
 		{
-			name: "mcc mnc default apn",
-			xml: `<apns>
-				<apn mcc="001" mnc="01" apn="phone" type="default,ia,mms"/>
-			</apns>`,
+			name: "mcc mnc apn",
+			json: `[{
+				"mcc": "001",
+				"mnc": "01",
+				"apn": "phone"
+			}]`,
 			want: map[string]apnProfile{"00101": {APN: "phone"}},
 		},
 		{
-			name: "trim fields and default type",
-			xml: `<apns>
-				<apn mcc=" 310 " mnc=" 260 " apn=" fast.t-mobile.com " type=" ia, default ,supl"/>
-			</apns>`,
+			name: "trim fields",
+			json: `[{
+				"mcc": " 310 ",
+				"mnc": " 260 ",
+				"apn": " fast.t-mobile.com "
+			}]`,
 			want: map[string]apnProfile{"310260": {APN: "fast.t-mobile.com"}},
 		},
 		{
 			name: "default apn credentials",
-			xml: `<apns>
-				<apn mcc="234" mnc="15" apn="wap.vodafone.co.uk" protocol="IPV4V6" user="wap" password="*wap" authtype="1" type="default"/>
-			</apns>`,
-			want: map[string]apnProfile{"23415": {
+			json: `[{
+				"mcc": "234",
+				"mnc": "91",
+				"apn": "wap.vodafone.co.uk",
+				"protocol": "IPV4V6",
+				"user": "wap",
+				"pass": "*wap",
+				"authType": 1
+			}]`,
+			want: map[string]apnProfile{"23491": {
 				APN:      "wap.vodafone.co.uk",
 				IPType:   "ipv4v6",
 				Username: "wap",
@@ -43,20 +53,20 @@ func TestDefaultAPNsFromXML(t *testing.T) {
 			}},
 		},
 		{
-			name: "ignore non default apns",
-			xml: `<apns>
-				<apn mcc="001" mnc="01" apn="mms" type="mms"/>
-				<apn mcc="001" mnc="01" apn="dun" type="dun"/>
-				<apn mcc="001" mnc="01" apn="empty"/>
-			</apns>`,
+			name: "skip incomplete entries",
+			json: `[
+				{"mcc": "", "mnc": "01", "apn": "missing-mcc"},
+				{"mcc": "001", "mnc": "", "apn": "missing-mnc"},
+				{"mcc": "001", "mnc": "01", "apn": " "}
+			]`,
 			want: map[string]apnProfile{},
 		},
 		{
-			name: "keep first default apn",
-			xml: `<apns>
-				<apn mcc="001" mnc="01" apn="first" type="default"/>
-				<apn mcc="001" mnc="01" apn="second" type="default"/>
-			</apns>`,
+			name: "keep first apn",
+			json: `[
+				{"mcc": "001", "mnc": "01", "apn": "first"},
+				{"mcc": "001", "mnc": "01", "apn": "second"}
+			]`,
 			want: map[string]apnProfile{"00101": {APN: "first"}},
 		},
 	}
@@ -66,30 +76,62 @@ func TestDefaultAPNsFromXML(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := defaultAPNsFromXML([]byte(tt.xml))
+			got, err := defaultAPNsFromJSON([]byte(tt.json))
 			if err != nil {
-				t.Fatalf("defaultAPNsFromXML() error = %v", err)
+				t.Fatalf("defaultAPNsFromJSON() error = %v", err)
 			}
 			if !maps.Equal(got, tt.want) {
-				t.Fatalf("defaultAPNsFromXML() = %#v, want %#v", got, tt.want)
+				t.Fatalf("defaultAPNsFromJSON() = %#v, want %#v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestDefaultAPNsFromXMLInvalid(t *testing.T) {
+func TestDefaultAPNsFromJSONInvalid(t *testing.T) {
 	t.Parallel()
 
-	if _, err := defaultAPNsFromXML([]byte("<apns>")); err == nil {
-		t.Fatal("defaultAPNsFromXML() error = nil, want error")
+	if _, err := defaultAPNsFromJSON([]byte("{")); err == nil {
+		t.Fatal("defaultAPNsFromJSON() error = nil, want error")
 	}
+}
+
+func TestAndroidAuthType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value *int
+		want  string
+	}{
+		{name: "missing", want: ""},
+		{name: "unknown", value: intPtr(-1), want: ""},
+		{name: "none", value: intPtr(0), want: "none"},
+		{name: "pap", value: intPtr(1), want: "pap"},
+		{name: "chap", value: intPtr(2), want: "chap"},
+		{name: "pap chap", value: intPtr(3), want: "pap|chap"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := androidAuthType(tt.value); got != tt.want {
+				t.Fatalf("androidAuthType() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func TestSelectAPN(t *testing.T) {
 	t.Parallel()
 
 	defaults := map[string]apnProfile{
-		"00101": {APN: "xml"},
+		"00101": {APN: "json"},
 	}
 	tests := []struct {
 		name      string
@@ -116,7 +158,7 @@ func TestSelectAPN(t *testing.T) {
 			want: "bearer",
 		},
 		{
-			name: "remembered wins over xml",
+			name: "remembered wins over default",
 			selection: apnSelection{
 				Remembered:         " remembered ",
 				OperatorIdentifier: "00101",
@@ -124,14 +166,14 @@ func TestSelectAPN(t *testing.T) {
 			want: "remembered",
 		},
 		{
-			name: "xml fallback",
+			name: "default fallback",
 			selection: apnSelection{
 				OperatorIdentifier: "00101",
 			},
-			want: "xml",
+			want: "json",
 		},
 		{
-			name: "missing xml keeps empty",
+			name: "missing default keeps empty",
 			selection: apnSelection{
 				OperatorIdentifier: "99999",
 			},
@@ -155,11 +197,11 @@ func TestSelectAPN(t *testing.T) {
 func TestPreferencesWithDefaultAPNCredentials(t *testing.T) {
 	t.Parallel()
 
-	modem := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23415"}}}
+	modem := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23491"}}}
 	prefs := Preferences{APN: "wap.vodafone.co.uk"}
 
 	got := preferencesWithDefaultAPNCredentials(modem, prefs)
-	if got.APNUsername != "wap" || got.APNPassword != "*wap" || got.APNAuth != "pap" {
+	if got.APNUsername != "wap" || got.APNPassword != "wap" || got.APNAuth != "pap" {
 		t.Fatalf("preferencesWithDefaultAPNCredentials() = %#v, want Vodafone credentials", got)
 	}
 	if got.IPType != "ipv4v6" {
@@ -185,13 +227,13 @@ func TestPreferencesWithDefaultAPNCredentials(t *testing.T) {
 func TestPreferencesWithSelectedAPN(t *testing.T) {
 	t.Parallel()
 
-	modem := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23415"}}}
+	modem := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23491"}}}
 
 	got := preferencesWithSelectedAPN(modem, Preferences{})
 	if got.APN != "wap.vodafone.co.uk" {
 		t.Fatalf("preferencesWithSelectedAPN() APN = %q, want Vodafone APN", got.APN)
 	}
-	if got.APNUsername != "wap" || got.APNPassword != "*wap" || got.APNAuth != "pap" {
+	if got.APNUsername != "wap" || got.APNPassword != "wap" || got.APNAuth != "pap" {
 		t.Fatalf("preferencesWithSelectedAPN() = %#v, want Vodafone credentials", got)
 	}
 	if got.IPType != "ipv4v6" {
@@ -217,11 +259,11 @@ func TestAPNForModem(t *testing.T) {
 			want:       "remembered",
 		},
 		{
-			name: "xml fallback from sim operator",
+			name: "default fallback from sim operator",
 			modem: &mmodem.Modem{
 				Sim: &mmodem.SIM{OperatorIdentifier: "00101"},
 			},
-			want: "phone",
+			want: "default",
 		},
 		{
 			name:  "missing sim keeps empty",
