@@ -143,7 +143,7 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
 
   const selectSource = (source: EsimTransferSource) => {
     selectedSource.value = source
-    sourceImei.value = ''
+    sourceImei.value = source.requiresSourceImei && modemId.value !== 'unknown' ? modemId.value : ''
     resetSelection()
   }
 

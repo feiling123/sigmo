@@ -99,6 +99,42 @@ describe('useEsimTransfer', () => {
     expect(onCompleted).toHaveBeenCalledOnce()
   })
 
+  it('defaults required CCID source IMEI to the current modem id', () => {
+    const transfer = useEsimTransfer(ref('target-imei'))
+
+    transfer.selectSource({
+      type: 'ccid',
+      id: 'reader-1',
+      name: 'Reader 1',
+      requiresSourceImei: true,
+    })
+    transfer.selectedProfile.value = {
+      id: 'profile-1',
+      type: 'esim',
+      name: 'Source line',
+      iccid: '8901',
+      enabled: true,
+      supported: true,
+    }
+
+    expect(transfer.sourceImei.value).toBe('target-imei')
+    expect(transfer.canStartTransfer.value).toBe(true)
+
+    transfer.startTransfer()
+    const ws = FakeWebSocket.instances[0]
+    expect(ws).toBeDefined()
+    if (!ws) return
+    ws.onopen?.()
+
+    expect(JSON.parse(ws.sent[0] ?? '{}')).toMatchObject({
+      type: TRANSFER_MESSAGE.start,
+      sourceType: 'ccid',
+      sourceId: 'reader-1',
+      profileId: 'profile-1',
+      sourceImei: 'target-imei',
+    })
+  })
+
   it('enters an error state for malformed websocket messages', () => {
     const transfer = useEsimTransfer(ref('modem-1'))
 
