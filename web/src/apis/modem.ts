@@ -7,6 +7,7 @@ import type {
   ModemSettingsResponse,
   WiFiCallingSettings,
   WiFiCallingSettingsResponse,
+  WiFiCallingWebsheetResponse,
 } from '@/types/modem'
 
 /**
@@ -91,6 +92,12 @@ export const useModemApi = () => {
     }).json()
   }
 
+  const startWiFiCallingWebsheet = (id: string) => {
+    return useFetch<WiFiCallingWebsheetResponse>(`modems/${id}/wifi-calling-websheets`, {
+      method: 'POST',
+    }).json()
+  }
+
   return {
     getModems,
     getModem,
@@ -100,5 +107,6 @@ export const useModemApi = () => {
     updateSettings,
     getWiFiCallingSettings,
     updateWiFiCallingSettings,
+    startWiFiCallingWebsheet,
   }
 }

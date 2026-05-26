@@ -4,6 +4,7 @@ import {
 } from '@/constants/esimTransfer'
 import { getStoredToken } from '@/lib/auth-storage'
 import type { EsimDownloadPreview } from '@/types/esim'
+import type { CarrierWebsheetInfo } from '@/types/websheet'
 
 export type TransferUserInput = {
   text: string
@@ -20,6 +21,7 @@ type TransferServerMessage = {
   iccid?: string
   profile?: EsimDownloadPreview
   input?: TransferUserInput
+  websheet?: CarrierWebsheetInfo
 }
 
 type TransferStartMessage = {
@@ -34,6 +36,7 @@ type Handlers = {
   onPreview: (profile?: EsimDownloadPreview) => void
   onUserInput: (input: TransferUserInput | null) => void
   onSourceDeletion: (iccid: string) => void
+  onWebsheet: (websheet: CarrierWebsheetInfo | null) => void
   onCompleted: () => void
   onError: (message: string) => void
 }
@@ -104,6 +107,9 @@ export const useEsimTransferSession = (handlers: Handlers) => {
           return
         case TRANSFER_MESSAGE.sourceDeletion:
           handlers.onSourceDeletion(message.iccid ?? '')
+          return
+        case TRANSFER_MESSAGE.websheet:
+          handlers.onWebsheet(message.websheet ?? null)
           return
         case TRANSFER_MESSAGE.completed:
           handlers.onCompleted()

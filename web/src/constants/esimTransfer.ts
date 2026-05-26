@@ -7,6 +7,7 @@ export const TRANSFER_STATE = {
   progress: 'progress',
   userInput: 'user_input',
   sourceDeletion: 'source_deletion',
+  websheet: 'websheet',
   completed: 'completed',
   error: 'error',
 } as const
@@ -19,6 +20,7 @@ export const TRANSFER_MESSAGE = {
   preview: 'preview',
   userInput: 'user_input',
   sourceDeletion: 'source_deletion',
+  websheet: 'websheet',
   completed: 'completed',
   error: 'error',
   cancel: 'cancel',
@@ -27,6 +29,7 @@ export const TRANSFER_MESSAGE = {
 export const TRANSFER_STAGE = {
   preparing: 'preparing',
   carrier: 'carrier',
+  websheet: 'websheet',
   downloading: 'downloading',
   enabling: 'enabling',
   completing: 'completing',
@@ -44,6 +47,7 @@ export const TRANSFER_CLIENT_ERROR = {
 export const transferStageProgress: Record<string, number> = {
   [TRANSFER_STAGE.preparing]: 10,
   [TRANSFER_STAGE.carrier]: 25,
+  [TRANSFER_STAGE.websheet]: 35,
   [TRANSFER_STAGE.downloading]: 45,
   [TRANSFER_STAGE.authenticatingClient]: 45,
   [TRANSFER_STAGE.authenticatingServer]: 60,
@@ -56,6 +60,7 @@ export const transferStageProgress: Record<string, number> = {
 export const transferStageLabelKey: Record<string, string> = {
   [TRANSFER_STAGE.preparing]: 'modemDetail.esim.transferStagePreparing',
   [TRANSFER_STAGE.carrier]: 'modemDetail.esim.transferStageCarrier',
+  [TRANSFER_STAGE.websheet]: 'modemDetail.esim.transferStageWebsheet',
   [TRANSFER_STAGE.downloading]: 'modemDetail.esim.transferStageDownloading',
   [TRANSFER_STAGE.authenticatingClient]: 'modemDetail.esim.downloadStageInitializing',
   [TRANSFER_STAGE.authenticatingServer]: 'modemDetail.esim.downloadStageConnecting',

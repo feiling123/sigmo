@@ -15,6 +15,7 @@ import type {
   EsimDownloadPreview,
   EsimTransferProfile,
   EsimTransferSource,
+  EsimTransferWebsheet,
 } from '@/types/esim'
 
 type Options = {
@@ -37,6 +38,7 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
   const userInputResponse = ref('')
   const sourceDeletionICCID = ref('')
   const previewProfile = ref<EsimDownloadPreview | null>(null)
+  const carrierWebsheet = ref<EsimTransferWebsheet | null>(null)
 
   const hasSources = computed(() => sources.value.length > 0)
   const downloadedName = computed(() => {
@@ -63,6 +65,7 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     userInputResponse.value = ''
     sourceDeletionICCID.value = ''
     previewProfile.value = null
+    carrierWebsheet.value = null
   }
 
   const resetAll = () => {
@@ -105,6 +108,10 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     onSourceDeletion: (iccid) => {
       sourceDeletionICCID.value = iccid
       state.value = TRANSFER_STATE.sourceDeletion
+    },
+    onWebsheet: (websheet) => {
+      carrierWebsheet.value = websheet
+      state.value = TRANSFER_STATE.websheet
     },
     onCompleted: () => {
       state.value = TRANSFER_STATE.completed
@@ -195,6 +202,10 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     state.value = TRANSFER_STATE.progress
   }
 
+  const completeWebsheet = () => {
+    state.value = TRANSFER_STATE.progress
+  }
+
   const cancelTransfer = () => {
     session.cancel()
     resetAll()
@@ -219,6 +230,7 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     userInputResponse,
     sourceDeletionICCID,
     previewProfile,
+    carrierWebsheet,
     hasSources,
     downloadedName,
     needsSourceImei,
@@ -229,6 +241,7 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     startTransfer,
     submitUserInput,
     confirmSourceDeletion,
+    completeWebsheet,
     cancelTransfer,
     resetAll,
   }

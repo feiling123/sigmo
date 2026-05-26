@@ -16,6 +16,7 @@ const (
 	wsTypeStart          = "start"
 	wsTypeUserInput      = "user_input"
 	wsTypeSourceDeletion = "source_deletion"
+	wsTypeWebsheet       = "websheet"
 	wsTypeCompleted      = "completed"
 	wsTypeError          = "error"
 )

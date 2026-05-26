@@ -163,6 +163,46 @@ describe('useEsimTransfer', () => {
     expect(transfer.errorMessage.value).toBe(TRANSFER_CLIENT_ERROR.invalidResponse)
   })
 
+  it('enters websheet state when carrier setup is required', () => {
+    const transfer = useEsimTransfer(ref('modem-1'))
+
+    transfer.selectedSource.value = {
+      type: 'modem',
+      id: 'source-1',
+      name: 'Source',
+      requiresSourceImei: false,
+    }
+    transfer.selectedProfile.value = {
+      id: 'profile-1',
+      type: 'esim',
+      name: 'Source line',
+      iccid: '8901',
+      enabled: true,
+      supported: true,
+    }
+
+    transfer.startTransfer()
+    const ws = FakeWebSocket.instances[0]
+    expect(ws).toBeDefined()
+    if (!ws) return
+    ws.message({
+      type: TRANSFER_MESSAGE.websheet,
+      websheet: {
+        id: 'sheet-1',
+        embedUrl: '/api/v1/websheets/sheet-1',
+        title: 'Carrier',
+        url: 'https://example.com/setup',
+        method: 'GET',
+      },
+    })
+
+    expect(transfer.state.value).toBe(TRANSFER_STATE.websheet)
+    expect(transfer.carrierWebsheet.value?.id).toBe('sheet-1')
+
+    transfer.completeWebsheet()
+    expect(transfer.state.value).toBe(TRANSFER_STATE.progress)
+  })
+
   it('enters an error state for unknown websocket message types', () => {
     const transfer = useEsimTransfer(ref('modem-1'))
 

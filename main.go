@@ -23,6 +23,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/validator"
+	"github.com/damonto/sigmo/internal/pkg/websheet"
 	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
@@ -121,9 +122,11 @@ func main() {
 		slog.Error("unable to configure message relay", "error", err)
 		os.Exit(1)
 	}
+	websheets := websheet.New(websheet.Config{})
 	wifiCalling := wificalling.New(wificalling.Config{
 		Store:      db,
 		OnIncoming: relay.ForwardWiFiCallingSMS,
+		Websheets:  websheets,
 	})
 	networkPreferences := modem.NewNetworkPreferencesWithStore(db)
 	router.Register(server, router.RegisterConfig{
@@ -134,6 +137,7 @@ func main() {
 		NetworkPreferences: networkPreferences,
 		Storage:            db,
 		WiFiCalling:        wifiCalling,
+		Websheets:          websheets,
 	})
 
 	go func() {

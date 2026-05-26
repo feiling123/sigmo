@@ -11,6 +11,8 @@ import (
 	"time"
 
 	imsclient "github.com/damonto/ims-client"
+	"github.com/damonto/sigmo/internal/pkg/websheet"
+	"github.com/damonto/ts43-go/ts43"
 	"github.com/godbus/dbus/v5"
 )
 
@@ -154,6 +156,95 @@ func TestStopByPathStopsMatchingSession(t *testing.T) {
 			}
 			if tt.removedPath == "/modem/1" && !cancelled["modem-1"] {
 				t.Fatal("matching session was not cancelled")
+			}
+		})
+	}
+}
+
+func TestWFCWebsheetRequestFromEntitlementErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "nsds",
+			err: &imsclient.NSDSWFCEntitlementError{
+				Err:     imsclient.ErrWFCEntitlementUserActionRequired,
+				Carrier: "Carrier",
+				Websheet: imsclient.WFCWebsheet{
+					URL:   "https://example.com/nsds",
+					Data:  "token=abc",
+					Title: "Wi-Fi Calling",
+				},
+			},
+			want: "https://example.com/nsds?token=abc",
+		},
+		{
+			name: "ts43",
+			err: &imsclient.WFCEntitlementError{
+				Err:    imsclient.ErrWFCEntitlementUserActionRequired,
+				Config: ts43.WFCConfig{CarrierName: "Carrier"},
+				Status: ts43.WFCStatus{
+					ServiceFlowURL:      "https://example.com/ts43?existing=1",
+					ServiceFlowUserData: "token=abc",
+				},
+			},
+			want: "https://example.com/ts43?existing=1&token=abc",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &coordinator{websheets: websheet.New(websheet.Config{AllowPrivateHosts: true})}
+			req, ok := c.wfcWebsheetRequest(tt.err)
+			if !ok {
+				t.Fatal("wfcWebsheetRequest() ok = false")
+			}
+			if req.URL != tt.want {
+				t.Fatalf("URL = %q, want %q", req.URL, tt.want)
+			}
+		})
+	}
+}
+
+func TestWFCWebsheetCallbackResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		callback websheet.Callback
+		want     wfcWebsheetCallbackAction
+	}{
+		{
+			name:     "entitlement changed retries connection",
+			callback: websheet.Callback{Source: "vowifi", Controller: "VoWiFiWebServiceFlow", Method: "entitlementChanged", Event: "entitlementChanged", ResultCode: "success"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "manual done retries connection",
+			callback: websheet.Callback{Event: "finishFlow"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "dismiss cancels pending connection",
+			callback: websheet.Callback{Source: "vowifi", Controller: "VoWiFiWebServiceFlow", Method: "dismissFlow", Event: "dismissFlow", ResultCode: "cancel"},
+			want:     wfcWebsheetCallbackDismiss,
+		},
+		{
+			name:     "close webview cancels pending connection",
+			callback: websheet.Callback{Source: "vowifi", Controller: "WiFiCallingWebViewController", Method: "CloseWebView"},
+			want:     wfcWebsheetCallbackDismiss,
+		},
+		{
+			name:     "status update keeps waiting",
+			callback: websheet.Callback{Source: "vowifi", Controller: "WiFiCallingWebViewController", Method: "phoneServicesAccountStatusChanged", Event: "phoneServicesAccountStatusChanged"},
+			want:     wfcWebsheetCallbackWait,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := wfcWebsheetCallbackResult(tt.callback); got != tt.want {
+				t.Fatalf("wfcWebsheetCallbackResult() = %v, want %v", got, tt.want)
 			}
 		})
 	}

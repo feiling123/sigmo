@@ -49,6 +49,8 @@ const (
 	errorCodeGetWiFiCallingSettingsFailed            = "get_wifi_calling_settings_failed"
 	errorCodeUpdateWiFiCallingSettingsInvalidRequest = "update_wifi_calling_settings_invalid_request"
 	errorCodeUpdateWiFiCallingSettingsFailed         = "update_wifi_calling_settings_failed"
+	errorCodeStartWiFiCallingWebsheetFailed          = "start_wifi_calling_websheet_failed"
+	errorCodeWiFiCallingWebsheetNotPending           = "wifi_calling_websheet_not_pending"
 )
 
 var (
@@ -205,12 +207,30 @@ func (h *Handler) GetWiFiCallingSettings(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetWiFiCallingSettingsFailed)
 	}
-	settings, err := h.wifiCalling.Settings(c.Request().Context(), modem)
+	status, err := h.wifiCalling.Status(c.Request().Context(), modem)
 	if err != nil {
 		return httpapi.Internal(c, errorCodeGetWiFiCallingSettingsFailed, err)
 	}
 	return c.JSON(http.StatusOK, WiFiCallingSettingsResponse{
-		Enabled:   settings.Enabled,
-		Preferred: settings.Preferred,
+		Enabled:   status.Enabled,
+		Preferred: status.Preferred,
+		Connected: status.Connected,
+		State:     status.State,
+		Websheet:  status.Websheet,
 	})
+}
+
+func (h *Handler) StartWiFiCallingWebsheet(c *echo.Context) error {
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeStartWiFiCallingWebsheetFailed)
+	}
+	info, err := h.wifiCalling.StartWebsheet(c.Request().Context(), modem)
+	if err != nil {
+		if errors.Is(err, wificalling.ErrWebsheetNotPending) {
+			return httpapi.BadRequest(c, errorCodeWiFiCallingWebsheetNotPending, err)
+		}
+		return httpapi.Internal(c, errorCodeStartWiFiCallingWebsheetFailed, err)
+	}
+	return c.JSON(http.StatusCreated, info)
 }

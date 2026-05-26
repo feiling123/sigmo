@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	"github.com/damonto/sigmo/internal/pkg/websheet"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
@@ -13,6 +14,7 @@ import (
 type Config struct {
 	Store      *storage.Store
 	OnIncoming IncomingSMSFunc
+	Websheets  *websheet.Broker
 }
 
 type coordinator struct {
@@ -49,7 +51,11 @@ func (c *coordinator) Status(ctx context.Context, modem *mmodem.Modem) (Status, 
 	if err != nil {
 		return Status{}, err
 	}
-	return Status{Settings: settings}, nil
+	return Status{Settings: settings, State: StateIdle}, nil
+}
+
+func (c *coordinator) StartWebsheet(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
+	return websheet.Info{}, ErrUnavailable
 }
 
 func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to string, text string) (storage.Message, error) {

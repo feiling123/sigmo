@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import CarrierWebsheetDialog from '@/components/CarrierWebsheetDialog.vue'
 import EsimDownloadProgressModal from '@/components/esim/EsimDownloadProgressModal.vue'
 import EsimDownloadResultModal from '@/components/esim/EsimDownloadResultModal.vue'
 import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
@@ -54,6 +55,9 @@ const terminal = computed(
 )
 const sourceDeletionOpen = computed(
   () => open.value && transferStarted.value && transfer.state.value === TRANSFER_STATE.sourceDeletion,
+)
+const carrierWebsheetOpen = computed(
+  () => open.value && transferStarted.value && transfer.state.value === TRANSFER_STATE.websheet,
 )
 const transferProgressOpen = computed(
   () =>
@@ -259,6 +263,13 @@ watch(open, (value) => {
     :iccid="transfer.sourceDeletionICCID.value"
     @cancel="transfer.confirmSourceDeletion(false)"
     @confirm="transfer.confirmSourceDeletion(true)"
+  />
+
+  <CarrierWebsheetDialog
+    :open="carrierWebsheetOpen"
+    :websheet="transfer.carrierWebsheet.value"
+    @cancel="closeDialog"
+    @done="transfer.completeWebsheet"
   />
 
   <EsimTransferStartConfirmAlert

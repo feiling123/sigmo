@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	"github.com/damonto/sigmo/internal/pkg/websheet"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
@@ -19,11 +20,19 @@ const (
 	keyPreferred         = "wifi_calling.preferred"
 	actionUSSDInitialize = "initialize"
 	actionUSSDReply      = "reply"
+
+	StateIdle             = "idle"
+	StateConnecting       = "connecting"
+	StateConnected        = "connected"
+	StateWebsheetRequired = "websheet_required"
+	StateDisconnected     = "disconnected"
 )
 
 var (
-	ErrUnavailable  = errors.New("wifi calling is unavailable")
-	ErrNotConnected = errors.New("wifi calling is not connected")
+	ErrUnavailable        = errors.New("wifi calling is unavailable")
+	ErrNotConnected       = errors.New("wifi calling is not connected")
+	ErrWebsheetNotPending = errors.New("wifi calling websheet is not pending")
+	ErrWebsheetDismissed  = errors.New("wifi calling websheet was dismissed")
 )
 
 type Settings struct {
@@ -34,6 +43,8 @@ type Settings struct {
 type Status struct {
 	Settings
 	Connected bool
+	State     string
+	Websheet  *websheet.Info
 }
 
 type IncomingSMS struct {
@@ -48,6 +59,7 @@ type Coordinator interface {
 	Settings(context.Context, *mmodem.Modem) (Settings, error)
 	UpdateSettings(context.Context, *mmodem.Modem, Settings) error
 	Status(context.Context, *mmodem.Modem) (Status, error)
+	StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error)
 	SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error)
 	ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error)
 }

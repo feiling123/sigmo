@@ -16,6 +16,7 @@ import (
 	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/damonto/sigmo/internal/pkg/config"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/websheet"
 	"github.com/damonto/ts43-go/sim"
 	"github.com/damonto/ts43-go/ts43"
 )
@@ -415,6 +416,67 @@ func TestSMDSDiscoveryEventFromDelayedDownload(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := smdsDiscoveryEventFromDelayedDownload(tt.event); got != tt.want {
 				t.Fatalf("smdsDiscoveryEventFromDelayedDownload() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTS43WebsheetResult(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		callback websheet.Callback
+		want     ts43.WebsheetCallbackEvent
+		wantNext ts43.Operation
+	}{
+		{
+			name: "activation code",
+			callback: websheet.Callback{
+				Event:          "profileReadyWithActivationCode",
+				ActivationCode: "1$example.com$matching-id",
+				ICCID:          "8901",
+				IMEI:           "123456789012345",
+			},
+			want: ts43.WebsheetEventProfileReadyWithActivationCode,
+		},
+		{
+			name: "finish flow acquire configuration",
+			callback: websheet.Callback{
+				Event:      "finishFlow",
+				NextAction: "AcquireConfiguration",
+			},
+			want:     ts43.WebsheetEventFinishFlow,
+			wantNext: ts43.OperationAcquireConf,
+		},
+		{
+			name:     "delete token",
+			callback: websheet.Callback{Event: "deleteToken"},
+			want:     ts43.WebsheetEventDeleteToken,
+		},
+		{
+			name:     "status",
+			callback: websheet.Callback{Event: "checkProfileServiceStatus"},
+			want:     ts43.WebsheetEventCheckProfileServiceStatus,
+		},
+		{
+			name:     "delete profile",
+			callback: websheet.Callback{Event: "deleteProfileInUse", ICCID: "8901"},
+			want:     ts43.WebsheetEventDeleteProfileInUse,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ts43WebsheetResult(tt.callback)
+			if err != nil {
+				t.Fatalf("ts43WebsheetResult() error = %v", err)
+			}
+			if got.Event != tt.want {
+				t.Fatalf("Event = %v, want %v", got.Event, tt.want)
+			}
+			if got.NextAction != tt.wantNext {
+				t.Fatalf("NextAction = %v, want %v", got.NextAction, tt.wantNext)
 			}
 		})
 	}

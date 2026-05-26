@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -22,16 +23,19 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	"github.com/damonto/sigmo/internal/pkg/websheet"
 )
 
 type Config struct {
 	Store      *storage.Store
 	OnIncoming IncomingSMSFunc
+	Websheets  *websheet.Broker
 }
 
 type coordinator struct {
 	settings   *SettingsStore
 	onIncoming IncomingSMSFunc
+	websheets  *websheet.Broker
 
 	mu       sync.Mutex
 	sessions map[string]*sessionState
@@ -44,6 +48,7 @@ type sessionState struct {
 	modemPath dbus.ObjectPath
 	profileID string
 	connected bool
+	websheet  *websheet.Session
 }
 
 var retryDelays = []time.Duration{
@@ -59,6 +64,7 @@ func New(cfg Config) Coordinator {
 	return &coordinator{
 		settings:   NewSettingsStore(cfg.Store),
 		onIncoming: cfg.OnIncoming,
+		websheets:  cfg.Websheets,
 		sessions:   make(map[string]*sessionState),
 	}
 }
@@ -122,8 +128,38 @@ func (c *coordinator) Status(ctx context.Context, modem *mmodem.Modem) (Status, 
 	c.mu.Lock()
 	session := c.sessions[modem.EquipmentIdentifier]
 	connected := session != nil && session.connected && session.profileID == profileID
+	state := StateIdle
+	var pending *websheet.Info
+	switch {
+	case connected:
+		state = StateConnected
+	case session != nil && session.websheet != nil:
+		state = StateWebsheetRequired
+		info := session.websheet.Info()
+		pending = &info
+	case session != nil:
+		state = StateConnecting
+	case settings.Enabled:
+		state = StateDisconnected
+	}
 	c.mu.Unlock()
-	return Status{Settings: settings, Connected: connected}, nil
+	return Status{Settings: settings, Connected: connected, State: state, Websheet: pending}, nil
+}
+
+func (c *coordinator) StartWebsheet(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
+	profileID, err := modem.ProfileID(ctx)
+	if err != nil {
+		return websheet.Info{}, err
+	}
+	c.mu.Lock()
+	session := c.sessions[modem.EquipmentIdentifier]
+	if session == nil || session.profileID != profileID || session.websheet == nil {
+		c.mu.Unlock()
+		return websheet.Info{}, ErrWebsheetNotPending
+	}
+	info := session.websheet.Info()
+	c.mu.Unlock()
+	return info, nil
 }
 
 func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to string, text string) (storage.Message, error) {
@@ -269,6 +305,18 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 		if ctx.Err() != nil {
 			return
 		}
+		if errors.Is(err, imsclient.ErrWFCEntitlementUserActionRequired) {
+			slog.Warn("Wi-Fi Calling requires carrier websheet", "modem", modem.EquipmentIdentifier, "error", err)
+			if err := c.waitForWebsheet(ctx, modem.EquipmentIdentifier); err != nil {
+				if errors.Is(err, ErrWebsheetDismissed) {
+					slog.Info("Wi-Fi Calling carrier websheet dismissed", "modem", modem.EquipmentIdentifier)
+					c.stop(modem.EquipmentIdentifier)
+				}
+				return
+			}
+			attempt = -1
+			continue
+		}
 		if attempt >= len(retryDelays) {
 			slog.Warn("Wi-Fi Calling connection attempts exhausted", "modem", modem.EquipmentIdentifier, "error", err)
 			return
@@ -294,10 +342,165 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem) (*im
 		return nil, err
 	}
 	if err := client.Connect(ctx); err != nil {
+		if req, ok := c.wfcWebsheetRequest(err); ok {
+			session, serr := c.websheets.Create(ctx, req)
+			if serr != nil {
+				_ = client.Close()
+				return nil, errors.Join(err, serr)
+			}
+			c.setWebsheet(modem.EquipmentIdentifier, session)
+		}
 		_ = client.Close()
 		return nil, err
 	}
 	return client, nil
+}
+
+func (c *coordinator) wfcWebsheetRequest(err error) (websheet.Request, bool) {
+	if c.websheets == nil || !errors.Is(err, imsclient.ErrWFCEntitlementUserActionRequired) {
+		return websheet.Request{}, false
+	}
+	var nsdsErr *imsclient.NSDSWFCEntitlementError
+	if errors.As(err, &nsdsErr) {
+		return websheet.Request{
+			URL:   wfcUserActionURL(nsdsErr.Websheet.URL, nsdsErr.Websheet.Data),
+			Title: firstNonEmpty(nsdsErr.Websheet.Title, "Wi-Fi Calling"),
+		}, true
+	}
+	var ts43Err *imsclient.WFCEntitlementError
+	if errors.As(err, &ts43Err) {
+		return websheet.Request{
+			URL:   wfcUserActionURL(ts43Err.Status.ServiceFlowURL, ts43Err.Status.ServiceFlowUserData),
+			Title: firstNonEmpty(ts43Err.Config.CarrierName, "Wi-Fi Calling"),
+		}, true
+	}
+	return websheet.Request{}, false
+}
+
+func wfcUserActionURL(rawURL, rawData string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	rawData = strings.TrimSpace(rawData)
+	if rawURL == "" || rawData == "" {
+		return rawURL
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return appendRawQuery(rawURL, rawData)
+	}
+	data := strings.TrimLeft(rawData, "?&")
+	values, err := url.ParseQuery(data)
+	if err != nil {
+		return appendRawQuery(rawURL, data)
+	}
+	query := parsed.Query()
+	for key, items := range values {
+		for _, item := range items {
+			query.Add(key, item)
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func appendRawQuery(rawURL, data string) string {
+	separator := "?"
+	if strings.Contains(rawURL, "?") {
+		separator = "&"
+	}
+	return rawURL + separator + data
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (c *coordinator) setWebsheet(modemID string, websheetSession *websheet.Session) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if session := c.sessions[modemID]; session != nil {
+		session.websheet = websheetSession
+	}
+}
+
+func (c *coordinator) waitForWebsheet(ctx context.Context, modemID string) error {
+	c.mu.Lock()
+	session := c.sessions[modemID]
+	var websheetSession *websheet.Session
+	if session != nil {
+		websheetSession = session.websheet
+	}
+	c.mu.Unlock()
+	if websheetSession == nil {
+		return ErrWebsheetNotPending
+	}
+	for {
+		callback, err := websheetSession.WaitCallback(ctx)
+		if err != nil {
+			return err
+		}
+		switch wfcWebsheetCallbackResult(callback) {
+		case wfcWebsheetCallbackRetry:
+			c.clearWebsheet(modemID, websheetSession)
+			return nil
+		case wfcWebsheetCallbackDismiss:
+			c.clearWebsheet(modemID, websheetSession)
+			return ErrWebsheetDismissed
+		}
+	}
+}
+
+func (c *coordinator) clearWebsheet(modemID string, websheetSession *websheet.Session) {
+	c.mu.Lock()
+	if session := c.sessions[modemID]; session != nil && session.websheet == websheetSession {
+		session.websheet = nil
+	}
+	c.mu.Unlock()
+	if c.websheets != nil {
+		c.websheets.Delete(websheetSession.Info().ID)
+	}
+}
+
+type wfcWebsheetCallbackAction int
+
+const (
+	wfcWebsheetCallbackWait wfcWebsheetCallbackAction = iota
+	wfcWebsheetCallbackRetry
+	wfcWebsheetCallbackDismiss
+)
+
+func wfcWebsheetCallbackResult(callback websheet.Callback) wfcWebsheetCallbackAction {
+	event := normalizeWebsheetCallbackKey(firstNonEmpty(callback.Event, callback.Method, callback.ResultCode))
+	method := normalizeWebsheetCallbackKey(callback.Method)
+	result := normalizeWebsheetCallbackKey(callback.ResultCode)
+	switch {
+	case event == "dismissflow" || event == "cancel" || result == "cancel":
+		return wfcWebsheetCallbackDismiss
+	case strings.Contains(method, "cancel") || strings.Contains(method, "closewebview"):
+		return wfcWebsheetCallbackDismiss
+	case event == "entitlementchanged" || event == "finishflow" || event == "done" || result == "success":
+		return wfcWebsheetCallbackRetry
+	default:
+		return wfcWebsheetCallbackWait
+	}
+}
+
+func normalizeWebsheetCallbackKey(value string) string {
+	value = strings.TrimSpace(value)
+	var b strings.Builder
+	for _, r := range value {
+		if r >= 'A' && r <= 'Z' {
+			r += 'a' - 'A'
+		}
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, profileID string, client *imsclient.Client) {

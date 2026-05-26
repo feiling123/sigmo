@@ -2,6 +2,8 @@
 
 package esimtransfer
 
+import "github.com/damonto/sigmo/internal/pkg/websheet"
+
 type SourceResponse struct {
 	Type               SourceType `json:"type"`
 	ID                 string     `json:"id"`
@@ -46,12 +48,13 @@ type clientMessage struct {
 }
 
 type serverMessage struct {
-	Type    string                  `json:"type"`
-	Stage   string                  `json:"stage,omitempty"`
-	Message string                  `json:"message,omitempty"`
-	ICCID   string                  `json:"iccid,omitempty"`
-	Input   *userInputMessage       `json:"input,omitempty"`
-	Profile *downloadProfilePreview `json:"profile,omitempty"`
+	Type     string                  `json:"type"`
+	Stage    string                  `json:"stage,omitempty"`
+	Message  string                  `json:"message,omitempty"`
+	ICCID    string                  `json:"iccid,omitempty"`
+	Input    *userInputMessage       `json:"input,omitempty"`
+	Profile  *downloadProfilePreview `json:"profile,omitempty"`
+	Websheet *websheet.Info          `json:"websheet,omitempty"`
 }
 
 type userInputMessage struct {

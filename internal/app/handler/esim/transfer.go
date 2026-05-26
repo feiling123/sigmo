@@ -32,6 +32,7 @@ func (h *Handler) transferService() *esimtransfer.Service {
 		Registry:      h.registry,
 		EnableProfile: h.enableTransferProfile,
 		DeleteProfile: h.deleteTransferProfile,
+		Websheets:     h.websheets,
 	})
 }
 

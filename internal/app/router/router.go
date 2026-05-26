@@ -19,11 +19,13 @@ import (
 	"github.com/damonto/sigmo/internal/app/handler/network"
 	"github.com/damonto/sigmo/internal/app/handler/notification"
 	"github.com/damonto/sigmo/internal/app/handler/ussd"
+	hwebsheet "github.com/damonto/sigmo/internal/app/handler/websheet"
 	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
 	"github.com/damonto/sigmo/internal/pkg/config"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	pwebsheet "github.com/damonto/sigmo/internal/pkg/websheet"
 	"github.com/damonto/sigmo/internal/pkg/wificalling"
 	"github.com/damonto/sigmo/web"
 )
@@ -36,6 +38,7 @@ type RegisterConfig struct {
 	NetworkPreferences *modem.NetworkPreferences
 	Storage            *storage.Store
 	WiFiCalling        wificalling.Coordinator
+	Websheets          *pwebsheet.Broker
 }
 
 func Register(e *echo.Echo, cfg RegisterConfig) {
@@ -68,6 +71,8 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 			protected.PUT("/config", h.Update)
 		}
 
+		hwebsheet.New(cfg.Websheets).Register(protected)
+
 		h := hmodem.New(cfg.Store, cfg.Registry, cfg.Internet, cfg.WiFiCalling)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
@@ -77,6 +82,7 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 		protected.PUT("/modems/:id/settings", h.UpdateSettings)
 		protected.GET("/modems/:id/wifi-calling-settings", h.GetWiFiCallingSettings)
 		protected.PUT("/modems/:id/wifi-calling-settings", h.UpdateWiFiCallingSettings)
+		protected.POST("/modems/:id/wifi-calling-websheets", h.StartWiFiCallingWebsheet)
 
 		{
 			h := message.New(cfg.Registry, cfg.Storage, cfg.WiFiCalling)
@@ -115,7 +121,7 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 		}
 
 		{
-			h := esim.New(cfg.Store, cfg.Registry, cfg.Internet)
+			h := esim.New(cfg.Store, cfg.Registry, cfg.Internet, cfg.Websheets)
 			protected.GET("/modems/:id/esims", h.List)
 			protected.POST("/modems/:id/esim-discoveries", h.Discovery)
 			protected.GET("/modems/:id/esims/download-sessions", h.Download)

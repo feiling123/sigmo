@@ -1,5 +1,7 @@
 package modem
 
+import "github.com/damonto/sigmo/internal/pkg/websheet"
+
 type SlotResponse struct {
 	Active             bool   `json:"active"`
 	OperatorName       string `json:"operatorName"`
@@ -35,8 +37,11 @@ type UpdateWiFiCallingSettingsRequest struct {
 }
 
 type WiFiCallingSettingsResponse struct {
-	Enabled   bool `json:"enabled"`
-	Preferred bool `json:"preferred"`
+	Enabled   bool           `json:"enabled"`
+	Preferred bool           `json:"preferred"`
+	Connected bool           `json:"connected"`
+	State     string         `json:"state"`
+	Websheet  *websheet.Info `json:"websheet,omitempty"`
 }
 
 type ModemResponse struct {

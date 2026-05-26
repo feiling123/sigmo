@@ -1,3 +1,5 @@
+import type { CarrierWebsheetInfo } from '@/types/websheet'
+
 export type SlotInfo = {
   active: boolean
   operatorName: string
@@ -48,4 +50,10 @@ export type WiFiCallingSettings = {
   preferred: boolean
 }
 
-export type WiFiCallingSettingsResponse = WiFiCallingSettings
+export type WiFiCallingSettingsResponse = WiFiCallingSettings & {
+  connected: boolean
+  state: string
+  websheet?: CarrierWebsheetInfo
+}
+
+export type WiFiCallingWebsheetResponse = CarrierWebsheetInfo

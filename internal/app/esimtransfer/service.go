@@ -17,6 +17,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/config"
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/websheet"
 )
 
 type SourceType string
@@ -33,6 +34,7 @@ const (
 const (
 	stagePreparing   = "preparing"
 	stageCarrier     = "carrier"
+	stageWebsheet    = "websheet"
 	stageDownloading = "downloading"
 	stageEnabling    = "enabling"
 	stageCompleting  = "completing"
@@ -54,7 +56,7 @@ var (
 	ErrSourceIMEIRequired     = errors.New("source IMEI is required")
 	ErrSourceUnsupported      = errors.New("transfer source is unsupported")
 	ErrProfileUnsupported     = errors.New("transfer profile is unsupported")
-	errWebsheetUnsupported    = errors.New("carrier websheet is unsupported")
+	errWebsheetUnavailable    = errors.New("carrier websheet service is unavailable")
 	errCarrierDismissed       = errors.New("carrier dismissed transfer")
 	errSourceDeletionDeclined = errors.New("carrier requires source profile deletion")
 	errPhysicalSourceDeletion = errors.New("carrier requested physical SIM deletion")
@@ -66,6 +68,7 @@ type Config struct {
 	Registry      *mmodem.Registry
 	EnableProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
 	DeleteProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
+	Websheets     *websheet.Broker
 }
 
 type Service struct {
@@ -73,6 +76,7 @@ type Service struct {
 	registry      *mmodem.Registry
 	enableProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
 	deleteProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
+	websheets     *websheet.Broker
 }
 
 func New(cfg Config) *Service {
@@ -81,6 +85,7 @@ func New(cfg Config) *Service {
 		registry:      cfg.Registry,
 		enableProfile: cfg.EnableProfile,
 		deleteProfile: cfg.DeleteProfile,
+		websheets:     cfg.Websheets,
 	}
 }
 
@@ -365,8 +370,11 @@ func (s *Service) handleEvent(ctx context.Context, session *session, active *act
 		}
 		return next, false, err
 	case ts43.WebsheetEvent:
-		slog.Warn("TS.43 websheet event is unsupported", "contentType", event.Websheet.ContentsType)
-		return result, false, errWebsheetUnsupported
+		next, err := s.handleWebsheet(ctx, session, active, result, event)
+		if err != nil {
+			slog.Warn("handle TS.43 websheet", "contentType", event.Websheet.ContentsType, "error", err)
+		}
+		return next, false, err
 	case ts43.SourceProfileDeletionEvent:
 		slog.Info("TS.43 transfer requires source profile deletion", "iccid", event.ICCID)
 		next, err := s.handleSourceProfileDeletion(ctx, session, active, start, result, event)

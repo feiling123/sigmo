@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
+import CarrierWebsheetDialog from '@/components/CarrierWebsheetDialog.vue'
 import ModemDeviceSettingsSection from '@/components/modem/settings/ModemDeviceSettingsSection.vue'
 import ModemInternetSection from '@/components/modem/settings/ModemInternetSection.vue'
 import ModemMsisdnSection from '@/components/modem/settings/ModemMsisdnSection.vue'
@@ -61,9 +62,14 @@ const {
 const {
   settingsWiFiCallingEnabled,
   settingsWiFiCallingPreferred,
+  settingsWiFiCallingState,
+  settingsWiFiCallingWebsheet,
   isWiFiCallingSettingsLoading,
   isWiFiCallingSettingsUpdating,
+  isWiFiCallingWebsheetStarting,
   handleWiFiCallingUpdate,
+  startWiFiCallingWebsheet,
+  completeWiFiCallingWebsheet,
 } = useModemWiFiCallingSettings({
   modemId,
   enabled: canUseWiFiCalling,
@@ -124,6 +130,10 @@ const {
 onMounted(() => {
   void fetchCapabilities()
 })
+
+const closeWiFiCallingWebsheet = () => {
+  settingsWiFiCallingWebsheet.value = null
+}
 </script>
 
 <template>
@@ -202,7 +212,11 @@ onMounted(() => {
           v-model:preferred="settingsWiFiCallingPreferred"
           :is-loading="isWiFiCallingSettingsLoading"
           :is-updating="isWiFiCallingSettingsUpdating"
+          :is-websheet-starting="isWiFiCallingWebsheetStarting"
+          :state="settingsWiFiCallingState"
+          :websheet="settingsWiFiCallingWebsheet"
           @update="handleWiFiCallingUpdate"
+          @start-websheet="startWiFiCallingWebsheet"
         />
 
         <ModemDeviceSettingsSection
@@ -227,5 +241,12 @@ onMounted(() => {
     :has-available-networks="hasAvailableNetworks"
     :has-selection="hasNetworkSelection"
     @register="handleNetworkRegister"
+  />
+
+  <CarrierWebsheetDialog
+    :open="settingsWiFiCallingWebsheet !== null"
+    :websheet="settingsWiFiCallingWebsheet"
+    @cancel="closeWiFiCallingWebsheet"
+    @done="completeWiFiCallingWebsheet"
   />
 </template>

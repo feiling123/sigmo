@@ -1,3 +1,5 @@
+import type { CarrierWebsheetInfo } from '@/types/websheet'
+
 export type EsimProfileApiResponse = {
   name: string
   serviceProviderName: string
@@ -61,3 +63,5 @@ export type EsimTransferProfile = {
   unsupportedReason?: string
   carrierName?: string
 }
+
+export type EsimTransferWebsheet = CarrierWebsheetInfo
