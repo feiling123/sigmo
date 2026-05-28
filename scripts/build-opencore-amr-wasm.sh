@@ -11,7 +11,7 @@ OUTPUT_BASENAME="${OUTPUT_BASENAME:-opencore-amr}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 refs_dir="${repo_root}/refs"
-out_dir="${repo_root}/web/public/codecs"
+out_dir="${repo_root}/web/src/assets/codecs"
 em_cache_dir="${EM_CACHE:-${repo_root}/.cache/emscripten}"
 
 opencore_archive="${refs_dir}/opencore-amr-${OPENCORE_AMR_VERSION}.tar.gz"

@@ -4,7 +4,14 @@ import { useCallMediaSession } from '@/composables/useCallMediaSession'
 import { CallMediaPipeline, type AmrCodecAdapter, type PcmFrame } from '@/lib/callMediaPipeline'
 import type { CallMediaInfo } from '@/types/call'
 
-type AudioStatus = 'idle' | 'preparing' | 'connecting' | 'ready' | 'unsupported' | 'closed' | 'error'
+type AudioStatus =
+  | 'idle'
+  | 'preparing'
+  | 'connecting'
+  | 'ready'
+  | 'unsupported'
+  | 'closed'
+  | 'error'
 
 type CodecFactory = (media: CallMediaInfo) => AmrCodecAdapter | Promise<AmrCodecAdapter>
 
@@ -19,6 +26,15 @@ type Options = {
   deps?: AudioDeps
 }
 
+const microphoneConstraints: MediaTrackConstraints = {
+  autoGainControl: true,
+  channelCount: 1,
+  echoCancellation: true,
+  noiseSuppression: true,
+}
+
+const defaultRemotePlaybackDelaySeconds = 0.08
+
 export const useCallAudioSession = (modemId: Ref<string>, options: Options = {}) => {
   const status = ref<AudioStatus>('idle')
   const errorMessage = ref('')
@@ -31,6 +47,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   let muteNode: GainNode | null = null
   let pipeline: CallMediaPipeline | null = null
   let nextPlaybackTime = 0
+  let remotePlaybackStarted = false
   let inputPromise: Promise<boolean> | null = null
 
   const media = useCallMediaSession(modemId, {
@@ -64,7 +81,12 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     const source = audioContext.createBufferSource()
     source.buffer = buffer
     source.connect(audioContext.destination)
-    const startAt = Math.max(audioContext.currentTime, nextPlaybackTime)
+    if (!remotePlaybackStarted || nextPlaybackTime <= audioContext.currentTime) {
+      nextPlaybackTime =
+        audioContext.currentTime + (frame.playbackDelaySeconds ?? defaultRemotePlaybackDelaySeconds)
+      remotePlaybackStarted = true
+    }
+    const startAt = nextPlaybackTime
     source.start(startAt)
     nextPlaybackTime = startAt + buffer.duration
   }
@@ -104,11 +126,13 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       }
       if (audioContext !== ctx) return false
       if (!stream) {
-        const getUserMedia = options.deps?.getUserMedia ?? navigator.mediaDevices?.getUserMedia.bind(navigator.mediaDevices)
+        const getUserMedia =
+          options.deps?.getUserMedia ??
+          navigator.mediaDevices?.getUserMedia.bind(navigator.mediaDevices)
         if (!getUserMedia) {
           throw new Error('Microphone capture is not available')
         }
-        const nextStream = await getUserMedia({ audio: true })
+        const nextStream = await getUserMedia({ audio: microphoneConstraints })
         if (audioContext !== ctx) {
           for (const track of nextStream.getTracks()) {
             track.stop()
@@ -138,9 +162,13 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       muteNode = audioContext.createGain()
       muteNode.gain.value = 0
 
-      processorNode = await createMicProcessor(audioContext, (samples) => {
-        sendMicPcm(samples, audioContext?.sampleRate ?? 48000)
-      }, options.deps?.micWorkletUrl)
+      processorNode = await createMicProcessor(
+        audioContext,
+        (samples) => {
+          sendMicPcm(samples, audioContext?.sampleRate ?? 48000)
+        },
+        options.deps?.micWorkletUrl,
+      )
 
       if ('onaudioprocess' in processorNode) {
         processorNode.onaudioprocess = (event: AudioProcessingEvent) => {
@@ -263,6 +291,8 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       audioContext = null
     }
     media.disconnect()
+    remotePlaybackStarted = false
+    nextPlaybackTime = 0
   }
 
   const stop = () => {
@@ -321,14 +351,19 @@ const createMicProcessor = async (
         numberOfOutputs: 1,
         outputChannelCount: [1],
       })
-      node.port.onmessage = (event: MessageEvent<{ type: string; samples?: Float32Array<ArrayBufferLike> }>) => {
+      node.port.onmessage = (
+        event: MessageEvent<{ type: string; samples?: Float32Array<ArrayBufferLike> }>,
+      ) => {
         if (event.data.type === 'pcm' && event.data.samples) {
           onPcm(event.data.samples)
         }
       }
       return node
     } catch (err) {
-      console.warn('[useCallAudioSession] AudioWorklet unavailable, falling back to ScriptProcessor', err)
+      console.warn(
+        '[useCallAudioSession] AudioWorklet unavailable, falling back to ScriptProcessor',
+        err,
+      )
     }
   }
 

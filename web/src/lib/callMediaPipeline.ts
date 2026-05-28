@@ -9,11 +9,13 @@ import {
   parseRtpPacket,
   type AmrCodec,
   type AmrFrame,
+  type RtpPacket,
 } from './amrRtp'
 
 export type PcmFrame = {
   samples: Float32Array<ArrayBufferLike>
   sampleRate: number
+  playbackDelaySeconds?: number
 }
 
 export type AmrCodecAdapter = {
@@ -33,12 +35,19 @@ export type CallMediaPipelineOptions = {
   initialSequenceNumber?: number
   initialTimestamp?: number
   ssrc?: number
+  now?: () => number
 }
 
 const defaultPTimeMillis = 20
+const initialPlaybackDelaySeconds = 0.08
+const minPlaybackDelaySeconds = 0.06
+const maxPlaybackDelaySeconds = 0.2
+const maxBufferedRemotePackets = 3
+const concealmentDecay = 0.85
 
 const random16 = () => Math.floor(Math.random() * 0x10000)
 const random32 = () => Math.floor(Math.random() * 0x100000000)
+const defaultNow = () => performance.now()
 
 const normalizeAmrCodec = (value: string): AmrCodec => {
   const codec = value.trim().toUpperCase()
@@ -95,12 +104,20 @@ export class CallMediaPipeline {
   private readonly codec?: AmrCodecAdapter
   private readonly onRemotePcm: (frame: PcmFrame) => void
   private readonly sendRtpPacket: (packet: Uint8Array<ArrayBuffer>) => boolean
+  private readonly now: () => number
   private readonly samplesPerPacket: number
   private sequenceNumber: number
   private timestamp: number
   private readonly ssrc: number
   private localBuffer: Float32Array<ArrayBufferLike> = new Float32Array()
   private sentFirstPacket = false
+  private expectedRemoteSequenceNumber: number | null = null
+  private remotePackets = new Map<number, RtpPacket>()
+  private previousRemoteTransit: number | null = null
+  private remoteJitter = 0
+  private remotePlaybackDelaySeconds = initialPlaybackDelaySeconds
+  private lastRemoteFrame: PcmFrame | null = null
+  private remoteFlushPromise: Promise<void> = Promise.resolve()
 
   constructor(options: CallMediaPipelineOptions) {
     this.media = options.media
@@ -108,6 +125,7 @@ export class CallMediaPipeline {
     this.codec = options.codec
     this.onRemotePcm = options.onRemotePcm
     this.sendRtpPacket = options.sendRtpPacket
+    this.now = options.now ?? defaultNow
     this.samplesPerPacket = Math.max(
       1,
       Math.round(
@@ -125,9 +143,68 @@ export class CallMediaPipeline {
       return false
     }
 
+    this.updateRemoteJitter(rtp)
+    this.queueRemotePacket(rtp)
+    const flush = this.remoteFlushPromise.then(() => this.flushRemotePackets())
+    this.remoteFlushPromise = flush.catch(() => {})
+    await flush
+    return true
+  }
+
+  private updateRemoteJitter(rtp: RtpPacket) {
+    const arrival = (this.now() * this.media.clockRate) / 1000
+    const transit = arrival - rtp.timestamp
+    if (this.previousRemoteTransit !== null) {
+      const delta = Math.abs(transit - this.previousRemoteTransit)
+      this.remoteJitter += (delta - this.remoteJitter) / 16
+      const target = clamp(
+        initialPlaybackDelaySeconds + (this.remoteJitter / this.media.clockRate) * 2,
+        minPlaybackDelaySeconds,
+        maxPlaybackDelaySeconds,
+      )
+      this.remotePlaybackDelaySeconds =
+        target > this.remotePlaybackDelaySeconds
+          ? target
+          : this.remotePlaybackDelaySeconds * 0.98 + target * 0.02
+    }
+    this.previousRemoteTransit = transit
+  }
+
+  private queueRemotePacket(rtp: RtpPacket) {
+    if (
+      this.expectedRemoteSequenceNumber !== null &&
+      !sequenceAheadOrEqual(rtp.sequenceNumber, this.expectedRemoteSequenceNumber)
+    ) {
+      return
+    }
+    if (this.remotePackets.has(rtp.sequenceNumber)) {
+      return
+    }
+    this.remotePackets.set(rtp.sequenceNumber, rtp)
+    this.expectedRemoteSequenceNumber ??= rtp.sequenceNumber
+  }
+
+  private async flushRemotePackets() {
+    while (this.expectedRemoteSequenceNumber !== null) {
+      const packet = this.remotePackets.get(this.expectedRemoteSequenceNumber)
+      if (!packet) {
+        if (this.remotePackets.size < maxBufferedRemotePackets) {
+          return
+        }
+        this.emitRemotePcm(this.concealRemoteFrame())
+        this.expectedRemoteSequenceNumber = nextSequenceNumber(this.expectedRemoteSequenceNumber)
+        continue
+      }
+      this.remotePackets.delete(this.expectedRemoteSequenceNumber)
+      await this.decodeRemotePacket(packet)
+      this.expectedRemoteSequenceNumber = nextSequenceNumber(this.expectedRemoteSequenceNumber)
+    }
+  }
+
+  private async decodeRemotePacket(rtp: RtpPacket) {
     if (this.codecName === 'PCMU') {
-      this.onRemotePcm({ samples: decodePCMU(rtp.payload), sampleRate: this.media.clockRate })
-      return true
+      this.emitRemotePcm({ samples: decodePCMU(rtp.payload), sampleRate: this.media.clockRate })
+      return
     }
 
     if (!this.codec) {
@@ -140,9 +217,38 @@ export class CallMediaPipeline {
       if (!frame.quality || frame.data.byteLength === 0) {
         continue
       }
-      this.onRemotePcm(await this.codec.decode(frame))
+      this.emitRemotePcm(await this.codec.decode(frame))
     }
-    return true
+  }
+
+  private emitRemotePcm(frame: PcmFrame) {
+    const next = {
+      ...frame,
+      playbackDelaySeconds: this.remotePlaybackDelaySeconds,
+    }
+    this.lastRemoteFrame = {
+      samples: next.samples.slice(),
+      sampleRate: next.sampleRate,
+      playbackDelaySeconds: next.playbackDelaySeconds,
+    }
+    this.onRemotePcm(next)
+  }
+
+  private concealRemoteFrame(): PcmFrame {
+    if (!this.lastRemoteFrame || this.lastRemoteFrame.samples.length === 0) {
+      return {
+        samples: new Float32Array(this.samplesPerPacket),
+        sampleRate: this.media.clockRate,
+      }
+    }
+    const samples = new Float32Array(this.lastRemoteFrame.samples.length)
+    for (let i = 0; i < samples.length; i++) {
+      samples[i] = (this.lastRemoteFrame.samples[i] ?? 0) * concealmentDecay
+    }
+    return {
+      samples,
+      sampleRate: this.lastRemoteFrame.sampleRate,
+    }
   }
 
   async sendPcm(samples: Float32Array<ArrayBufferLike>, sampleRate: number) {
@@ -190,9 +296,22 @@ export class CallMediaPipeline {
 
   close() {
     this.localBuffer = new Float32Array()
+    this.remotePackets.clear()
+    this.expectedRemoteSequenceNumber = null
+    this.previousRemoteTransit = null
+    this.remoteJitter = 0
+    this.remotePlaybackDelaySeconds = initialPlaybackDelaySeconds
+    this.lastRemoteFrame = null
+    this.remoteFlushPromise = Promise.resolve()
     void this.codec?.close?.()
   }
 }
+
+const nextSequenceNumber = (value: number) => (value + 1) & 0xffff
+
+const sequenceAheadOrEqual = (left: number, right: number) => ((left - right) & 0xffff) < 0x8000
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
 export const decodePCMU = (payload: Uint8Array<ArrayBufferLike>) => {
   const out = new Float32Array(payload.byteLength)

@@ -76,10 +76,12 @@ describe('call media pipeline', () => {
     await expect(pipeline.receiveRtpPacket(packet)).resolves.toBe(true)
 
     expect(adapter.decode).toHaveBeenCalledWith(frame(3))
-    expect(onRemotePcm).toHaveBeenCalledWith({
-      samples: new Float32Array([0.1, 0.2]),
-      sampleRate: 8000,
-    })
+    expect(onRemotePcm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        samples: new Float32Array([0.1, 0.2]),
+        sampleRate: 8000,
+      }),
+    )
   })
 
   it('ignores RTP packets for another payload type', async () => {
@@ -232,10 +234,105 @@ describe('call media pipeline', () => {
 
     await expect(pipeline.receiveRtpPacket(packet)).resolves.toBe(true)
 
-    expect(onRemotePcm).toHaveBeenCalledWith({
-      samples: expect.any(Float32Array),
+    expect(onRemotePcm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        samples: expect.any(Float32Array),
+        sampleRate: 8000,
+      }),
+    )
+  })
+
+  it('reorders buffered remote RTP packets before decoding', async () => {
+    const onRemotePcm = vi.fn()
+    const adapter = codec()
+    vi.mocked(adapter.decode).mockImplementation((next) => ({
+      samples: new Float32Array([next.data[0] ?? 0]),
       sampleRate: 8000,
+    }))
+    const pipeline = new CallMediaPipeline({
+      media,
+      codec: adapter,
+      onRemotePcm,
+      sendRtpPacket: vi.fn(),
     })
+    const packet = (sequenceNumber: number, value: number) =>
+      buildRtpPacket({
+        payloadType: media.payloadType,
+        sequenceNumber,
+        timestamp: sequenceNumber * 160,
+        ssrc: 3,
+        marker: false,
+        payload: buildAmrOctetAlignedPayload('AMR', [frame(value)]),
+      })
+
+    await expect(pipeline.receiveRtpPacket(packet(1, 1))).resolves.toBe(true)
+    await expect(pipeline.receiveRtpPacket(packet(3, 3))).resolves.toBe(true)
+    expect(onRemotePcm).toHaveBeenCalledTimes(1)
+
+    await expect(pipeline.receiveRtpPacket(packet(2, 2))).resolves.toBe(true)
+
+    expect(onRemotePcm).toHaveBeenCalledTimes(3)
+    expect(onRemotePcm.mock.calls.map(([next]) => next.samples[0])).toEqual([1, 2, 3])
+  })
+
+  it('inserts a decayed concealment frame when a remote RTP packet is lost', async () => {
+    const onRemotePcm = vi.fn()
+    const adapter = codec()
+    vi.mocked(adapter.decode).mockImplementation((next) => ({
+      samples: new Float32Array([next.data[0] ?? 0]),
+      sampleRate: 8000,
+    }))
+    const pipeline = new CallMediaPipeline({
+      media,
+      codec: adapter,
+      onRemotePcm,
+      sendRtpPacket: vi.fn(),
+    })
+    const packet = (sequenceNumber: number, value: number) =>
+      buildRtpPacket({
+        payloadType: media.payloadType,
+        sequenceNumber,
+        timestamp: sequenceNumber * 160,
+        ssrc: 3,
+        marker: false,
+        payload: buildAmrOctetAlignedPayload('AMR', [frame(value)]),
+      })
+
+    await expect(pipeline.receiveRtpPacket(packet(1, 10))).resolves.toBe(true)
+    await expect(pipeline.receiveRtpPacket(packet(3, 30))).resolves.toBe(true)
+    await expect(pipeline.receiveRtpPacket(packet(4, 40))).resolves.toBe(true)
+    await expect(pipeline.receiveRtpPacket(packet(5, 50))).resolves.toBe(true)
+
+    expect(onRemotePcm.mock.calls.map(([next]) => next.samples[0])).toEqual([10, 8.5, 30, 40, 50])
+  })
+
+  it('raises remote playback delay when RTP arrival jitter increases', async () => {
+    let now = 0
+    const onRemotePcm = vi.fn()
+    const pipeline = new CallMediaPipeline({
+      media: { ...media, codec: 'PCMU', payloadType: 0 },
+      onRemotePcm,
+      sendRtpPacket: vi.fn(),
+      now: () => now,
+    })
+    const packet = (sequenceNumber: number, timestamp: number) =>
+      buildRtpPacket({
+        payloadType: 0,
+        sequenceNumber,
+        timestamp,
+        ssrc: 3,
+        marker: false,
+        payload: encodePCMU(new Float32Array(160)),
+      })
+
+    await expect(pipeline.receiveRtpPacket(packet(1, 0))).resolves.toBe(true)
+    now = 100
+    await expect(pipeline.receiveRtpPacket(packet(2, 160))).resolves.toBe(true)
+
+    const first = onRemotePcm.mock.calls[0]?.[0].playbackDelaySeconds
+    const second = onRemotePcm.mock.calls[1]?.[0].playbackDelaySeconds
+    expect(first).toBe(0.08)
+    expect(second).toBeGreaterThan(first ?? 0)
   })
 
   it('encodes local PCM into PCMU RTP packets', async () => {

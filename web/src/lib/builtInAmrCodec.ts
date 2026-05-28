@@ -1,4 +1,6 @@
 import type { CallMediaInfo } from '@/types/call'
+import OpenCoreAmrFactoryValue from '@/assets/codecs/opencore-amr.js'
+import wasmBinaryURL from '@/assets/codecs/opencore-amr.wasm?url'
 
 import type { AmrCodec, AmrFrame } from './amrRtp'
 import { resampleMono, type AmrCodecAdapter, type PcmFrame } from './callMediaPipeline'
@@ -31,8 +33,7 @@ type OpenCoreAmrGlobal = typeof globalThis & {
   __sigmoOpenCoreAmrFactory?: OpenCoreAmrFactory
 }
 
-const wasmModuleURL = '/codecs/opencore-amr.js'
-const wasmBinaryURL = '/codecs/opencore-amr.wasm'
+const OpenCoreAmrFactory = OpenCoreAmrFactoryValue as OpenCoreAmrFactory
 
 const amrHeader = new Uint8Array([0x23, 0x21, 0x41, 0x4d, 0x52, 0x0a])
 const amrWbHeader = new Uint8Array([0x23, 0x21, 0x41, 0x4d, 0x52, 0x2d, 0x57, 0x42, 0x0a])
@@ -73,7 +74,6 @@ export const builtInAmrCodecSupports = (media: CallMediaInfo) => {
 }
 
 let modulePromise: Promise<OpenCoreAmrModule> | null = null
-
 export const createBuiltInAmrCodec = async (media: CallMediaInfo): Promise<AmrCodecAdapter> => {
   const codec = normalizeCodec(media)
   const module = await loadOpenCoreAmrModule()
@@ -108,10 +108,7 @@ const loadOpenCoreAmrFactory = async () => {
   if (factory) {
     return factory
   }
-  const loaded = (await import(/* @vite-ignore */ wasmModuleURL)) as {
-    default: OpenCoreAmrFactory
-  }
-  return loaded.default
+  return OpenCoreAmrFactory
 }
 
 class OpenCoreAmrCodec implements AmrCodecAdapter {

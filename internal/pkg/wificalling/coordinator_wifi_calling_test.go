@@ -366,7 +366,7 @@ func TestBrowserVoiceMediaOfferUsesFullDuplexCodec(t *testing.T) {
 		name string
 		want []imsvoice.AudioCodec
 	}{
-		{name: "browser codecs", want: []imsvoice.AudioCodec{imsvoice.CodecAMR, imsvoice.CodecPCMU}},
+		{name: "browser codecs", want: []imsvoice.AudioCodec{imsvoice.CodecAMRWB, imsvoice.CodecAMR, imsvoice.CodecPCMU}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -386,6 +386,7 @@ func TestBrowserVoiceConfigUsesFullDuplexCodec(t *testing.T) {
 		{
 			name: "browser codecs with dtmf",
 			wantCodecs: []imsvoice.AudioCodecConfig{
+				{Name: imsvoice.CodecAMRWB, PayloadTypes: []int{104}, ClockRate: 16000},
 				{Name: imsvoice.CodecAMR, PayloadTypes: []int{102}, ClockRate: 8000, ModeSet: "0,2,4,7"},
 				{Name: imsvoice.CodecTelephoneEvent, PayloadTypes: []int{101}, ClockRate: 8000},
 				{Name: imsvoice.CodecPCMU, PayloadTypes: []int{0}, ClockRate: 8000},
@@ -418,7 +419,7 @@ func TestIsSupportedCallMediaCodec(t *testing.T) {
 		want  bool
 	}{
 		{name: "amr", codec: imsvoice.CodecAMR, want: true},
-		{name: "amr wb", codec: imsvoice.CodecAMRWB, want: false},
+		{name: "amr wb", codec: imsvoice.CodecAMRWB, want: true},
 		{name: "pcmu", codec: imsvoice.CodecPCMU, want: true},
 		{name: "evs", codec: imsvoice.CodecEVS, want: false},
 		{name: "telephone event", codec: imsvoice.CodecTelephoneEvent, want: false},

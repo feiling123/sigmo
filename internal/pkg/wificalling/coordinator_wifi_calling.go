@@ -316,13 +316,18 @@ func failedVoiceCallID(modemID string, profileID string, number string, at time.
 
 func browserVoiceMediaOffer() imsvoice.MediaOffer {
 	return imsvoice.MediaOffer{
-		Codecs: []imsvoice.AudioCodec{imsvoice.CodecAMR, imsvoice.CodecPCMU},
+		Codecs: []imsvoice.AudioCodec{imsvoice.CodecAMRWB, imsvoice.CodecAMR, imsvoice.CodecPCMU},
 	}
 }
 
 func browserVoiceConfig() imsvoice.Config {
 	return imsvoice.Config{
 		Codecs: []imsvoice.AudioCodecConfig{
+			{
+				Name:         imsvoice.CodecAMRWB,
+				PayloadTypes: []int{104},
+				ClockRate:    16000,
+			},
 			{
 				Name:         imsvoice.CodecAMR,
 				PayloadTypes: []int{102},
@@ -407,7 +412,7 @@ func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, ca
 }
 
 func isSupportedCallMediaCodec(codec imsvoice.AudioCodec) bool {
-	return codec == imsvoice.CodecAMR || codec == imsvoice.CodecPCMU
+	return codec == imsvoice.CodecAMRWB || codec == imsvoice.CodecAMR || codec == imsvoice.CodecPCMU
 }
 
 func (c *coordinator) SubscribeVoiceEvents(fn VoiceEventFunc) func() {

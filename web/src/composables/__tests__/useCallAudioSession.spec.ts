@@ -4,12 +4,15 @@ import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCallAudioSession } from '@/composables/useCallAudioSession'
-import type { AmrCodecAdapter } from '@/lib/callMediaPipeline'
+import { buildRtpPacket } from '@/lib/amrRtp'
+import { encodePCMU, type AmrCodecAdapter } from '@/lib/callMediaPipeline'
 
-const codecFactory = vi.fn((): AmrCodecAdapter => ({
-  decode: vi.fn(),
-  encode: vi.fn(() => []),
-}))
+const codecFactory = vi.fn(
+  (): AmrCodecAdapter => ({
+    decode: vi.fn(),
+    encode: vi.fn(() => []),
+  }),
+)
 
 class FakeWebSocket {
   static OPEN = 1
@@ -48,6 +51,8 @@ const audioContext = () =>
     close: vi.fn(),
   }) as unknown as AudioContext
 
+const node = () => ({ connect: vi.fn(), disconnect: vi.fn() })
+
 const deferred = () => {
   let resolve!: () => void
   const promise = new Promise<void>((done) => {
@@ -75,9 +80,12 @@ describe('call audio session', () => {
 
   it('prepares microphone input without opening call media', async () => {
     const stop = vi.fn()
-    const getUserMedia = vi.fn(async () => ({
-      getTracks: () => [{ stop }],
-    } as unknown as MediaStream))
+    const getUserMedia = vi.fn(
+      async () =>
+        ({
+          getTracks: () => [{ stop }],
+        }) as unknown as MediaStream,
+    )
     let audioState: AudioContextState = 'suspended'
     const audioContext = {
       get state() {
@@ -99,9 +107,91 @@ describe('call audio session', () => {
 
     await expect(session.prepare()).resolves.toBe(true)
 
-    expect(getUserMedia).toHaveBeenCalledWith({ audio: true })
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        autoGainControl: true,
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+    })
     expect(session.status.value).toBe('idle')
     expect(session.mediaStatus.value).toBe('idle')
+  })
+
+  it('buffers remote PCM briefly before playback to absorb jitter', async () => {
+    const start = vi.fn()
+    const buffer = {
+      duration: 0.02,
+      copyToChannel: vi.fn(),
+    }
+    const audioContext = {
+      state: 'running',
+      currentTime: 10,
+      destination: node(),
+      close: vi.fn(),
+      createBuffer: vi.fn(() => buffer),
+      createBufferSource: vi.fn(() => ({
+        buffer: null,
+        connect: vi.fn(),
+        start,
+      })),
+      createGain: vi.fn(() => ({
+        ...node(),
+        gain: { value: 1 },
+      })),
+      createMediaStreamSource: vi.fn(() => node()),
+      createScriptProcessor: vi.fn(() => node()),
+    } as unknown as AudioContext
+    const session = useCallAudioSession(ref('modem-1'), {
+      codecFactory,
+      deps: {
+        createAudioContext: () => audioContext,
+        getUserMedia: vi.fn(
+          async () =>
+            ({
+              getTracks: () => [{ stop: vi.fn() }],
+            }) as unknown as MediaStream,
+        ),
+      },
+    })
+
+    await expect(session.start('call-1')).resolves.toBe(true)
+    const ws = FakeWebSocket.instances[0]
+    expect(ws).toBeDefined()
+    if (!ws) return
+
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'ready',
+        media: {
+          codec: 'PCMU',
+          payloadType: 0,
+          clockRate: 8000,
+          channels: 1,
+          octetAlign: false,
+          dtmfPayloadType: 101,
+          dtmfClockRate: 8000,
+          ptimeMillis: 20,
+        },
+      }),
+    } as MessageEvent<unknown>)
+    await nextTick()
+
+    ws.onmessage?.({
+      data: buildRtpPacket({
+        payloadType: 0,
+        sequenceNumber: 1,
+        timestamp: 160,
+        ssrc: 42,
+        marker: false,
+        payload: encodePCMU(new Float32Array(160)),
+      }).buffer,
+    } as MessageEvent<unknown>)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(start).toHaveBeenCalledWith(10.08)
   })
 
   it('does not read a cleared audio context when unmounted during output resume', async () => {
@@ -189,9 +279,12 @@ describe('call audio session', () => {
       codecFactory,
       deps: {
         createAudioContext: audioContext,
-        getUserMedia: vi.fn(async () => ({
-          getTracks: () => [{ stop }],
-        } as unknown as MediaStream)),
+        getUserMedia: vi.fn(
+          async () =>
+            ({
+              getTracks: () => [{ stop }],
+            }) as unknown as MediaStream,
+        ),
       },
     })
 
@@ -212,9 +305,12 @@ describe('call audio session', () => {
       codecFactory,
       deps: {
         createAudioContext: audioContext,
-        getUserMedia: vi.fn(async () => ({
-          getTracks: () => [{ stop }],
-        } as unknown as MediaStream)),
+        getUserMedia: vi.fn(
+          async () =>
+            ({
+              getTracks: () => [{ stop }],
+            }) as unknown as MediaStream,
+        ),
       },
     })
 
@@ -235,9 +331,12 @@ describe('call audio session', () => {
       codecFactory,
       deps: {
         createAudioContext: audioContext,
-        getUserMedia: vi.fn(async () => ({
-          getTracks: () => [{ stop }],
-        } as unknown as MediaStream)),
+        getUserMedia: vi.fn(
+          async () =>
+            ({
+              getTracks: () => [{ stop }],
+            }) as unknown as MediaStream,
+        ),
       },
     })
 

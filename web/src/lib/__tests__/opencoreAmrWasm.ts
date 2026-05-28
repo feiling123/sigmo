@@ -12,8 +12,8 @@ declare global {
 }
 
 export const installGeneratedOpenCoreAmrFactory = async () => {
-  const modulePath = resolve(process.cwd(), 'public/codecs/opencore-amr.js')
-  const wasmPath = resolve(process.cwd(), 'public/codecs/opencore-amr.wasm')
+  const modulePath = resolve(process.cwd(), 'src/assets/codecs/opencore-amr.js')
+  const wasmPath = resolve(process.cwd(), 'src/assets/codecs/opencore-amr.wasm')
   const moduleURL = pathToFileURL(modulePath).href
   const [{ default: factory }, wasmBytes] = await Promise.all([
     import(/* @vite-ignore */ moduleURL) as Promise<{ default: OpenCoreAmrFactory }>,
