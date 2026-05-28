@@ -2,7 +2,7 @@ import { computed, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useMessageApi } from '@/apis/message'
-import { formatMessageTimestamp } from '@/lib/datetime'
+import { formatListTimestamp } from '@/lib/datetime'
 import type { MessageResponse } from '@/types/message'
 
 export type ConversationItem = {
@@ -39,7 +39,7 @@ export const useModemMessages = (modemId: ComputedRef<string>) => {
       participantValue: getParticipantValue(message),
       participantLabel: getParticipantLabel(message),
       preview: message.text,
-      timestampLabel: formatMessageTimestamp(message.timestamp),
+      timestampLabel: formatListTimestamp(message.timestamp),
     })),
   )
 

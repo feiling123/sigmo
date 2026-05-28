@@ -21,7 +21,7 @@ const browserLocales = (): Intl.LocalesArgument => {
   return navigator.language || undefined
 }
 
-export const formatMessageTimestamp = (
+export const formatListTimestamp = (
   value: string,
   locales: Intl.LocalesArgument = browserLocales(),
   now = new Date(),
@@ -52,3 +52,5 @@ export const formatMessageTimestamp = (
     year: 'numeric',
   }).format(date)
 }
+
+export const formatMessageTimestamp = formatListTimestamp

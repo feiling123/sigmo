@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatMessageTimestamp } from '@/lib/datetime'
+import { formatListTimestamp, formatMessageTimestamp } from '@/lib/datetime'
 
-describe('formatMessageTimestamp', () => {
+describe('formatListTimestamp', () => {
   const now = new Date('2026-05-08T20:00:00')
 
   const tests = [
@@ -40,7 +40,11 @@ describe('formatMessageTimestamp', () => {
 
   for (const tt of tests) {
     it(tt.name, () => {
-      expect(formatMessageTimestamp(tt.value, tt.locales, now)).toBe(tt.want)
+      expect(formatListTimestamp(tt.value, tt.locales, now)).toBe(tt.want)
     })
   }
+
+  it('keeps the message timestamp export on the shared formatter', () => {
+    expect(formatMessageTimestamp('2026-05-08T09:05:00', 'en-US', now)).toBe('9:05 AM')
+  })
 })

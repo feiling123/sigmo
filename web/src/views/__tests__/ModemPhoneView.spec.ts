@@ -38,6 +38,10 @@ const browserCodecHarness = vi.hoisted(() => ({
   hasCodec: false,
 }))
 
+const datetimeHarness = vi.hoisted(() => ({
+  formatListTimestamp: vi.fn(),
+}))
+
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: 'modem-1' } }),
 }))
@@ -115,6 +119,10 @@ vi.mock('@/composables/useCallAudioSession', () => ({
 vi.mock('@/lib/browserAmrCodec', () => ({
   createBrowserAmrCodec: vi.fn(),
   hasBrowserAmrCodec: () => browserCodecHarness.hasCodec,
+}))
+
+vi.mock('@/lib/datetime', () => ({
+  formatListTimestamp: datetimeHarness.formatListTimestamp,
 }))
 
 vi.mock('lucide-vue-next', () => ({
@@ -205,6 +213,8 @@ describe('ModemPhoneView phone interactions', () => {
     callAudioHarness.start.mockReset()
     callAudioHarness.stop.mockReset()
     browserCodecHarness.hasCodec = false
+    datetimeHarness.formatListTimestamp.mockReset()
+    datetimeHarness.formatListTimestamp.mockImplementation((value: string) => `short ${value}`)
     modemApiHarness.getWiFiCallingSettings.mockReset()
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
       data: ref({ enabled: true, preferred: true, connected: false, state: 'disconnected' }),
@@ -226,7 +236,7 @@ describe('ModemPhoneView phone interactions', () => {
     expect(ussdHarness.executeUssd).toHaveBeenCalledWith('modem-1', 'initialize', '*1')
     expect(wrapper.text()).toContain('USSD')
     expect(wrapper.text()).toContain('Balance: 1')
-    expect(wrapper.find('input').element.value).toBe('')
+    expect(wrapper.get<HTMLInputElement>('input').element.value).toBe('')
 
     await wrapper
       .findAll('button')
@@ -234,7 +244,18 @@ describe('ModemPhoneView phone interactions', () => {
       ?.trigger('click')
     await wrapper.get('button[aria-label="Open dialpad"]').trigger('click')
 
-    expect(wrapper.text()).toContain('Number')
+    expect(wrapper.get<HTMLInputElement>('input[type="tel"]').element.value).toBe('')
+  })
+
+  it('dials a number entered directly in the phone input', async () => {
+    const wrapper = mountView()
+
+    await wrapper.get('button[aria-label="Open dialpad"]').trigger('click')
+    await wrapper.get('input[type="tel"]').setValue('+12242255559')
+    await callButton(wrapper)?.trigger('click')
+    await flushPromises()
+
+    expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559')
   })
 
   it('keeps the USSD dialog dismissible after a request error', async () => {
@@ -258,7 +279,7 @@ describe('ModemPhoneView phone interactions', () => {
     expect(wrapper.text()).not.toContain('USSD')
   })
 
-  it('renders call direction, duration, and calls back from recent records', async () => {
+  it('renders call details without direction text and calls back from recent records', async () => {
     phoneHarness.recentCalls = [
       {
         callID: 'call-out',
@@ -287,8 +308,10 @@ describe('ModemPhoneView phone interactions', () => {
     ]
     const wrapper = mountView()
 
-    expect(wrapper.text()).toContain('Outgoing')
-    expect(wrapper.text()).toContain('Incoming')
+    expect(wrapper.text()).not.toContain('Outgoing')
+    expect(wrapper.text()).not.toContain('Incoming')
+    expect(wrapper.text()).toContain('short 2026-05-27T00:01:15Z')
+    expect(datetimeHarness.formatListTimestamp).toHaveBeenCalledWith('2026-05-27T00:01:15Z')
     expect(wrapper.text()).toContain('1:05')
     expect(wrapper.text()).not.toContain('0:09')
     expect(wrapper.text()).not.toContain('0:00')

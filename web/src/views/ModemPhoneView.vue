@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Delete, Phone, PhoneCall, PhoneIncoming, PhoneOutgoing } from 'lucide-vue-next'
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
@@ -21,6 +21,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { useModemCallSession } from '@/composables/useModemCallSession'
 import { useStickyTopBar } from '@/composables/useStickyTopBar'
 import { hasBrowserAmrCodec } from '@/lib/browserAmrCodec'
+import { formatListTimestamp } from '@/lib/datetime'
 import type { CallRecord } from '@/types/call'
 import type { UssdAction } from '@/types/ussd'
 
@@ -29,6 +30,7 @@ const { t } = useI18n()
 const modemApi = useModemApi()
 const ussdApi = useUssdApi()
 const backButtonRef = ref<HTMLElement | null>(null)
+const dialInputRef = ref<HTMLInputElement | null>(null)
 const { isStickyVisible } = useStickyTopBar(backButtonRef)
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
@@ -81,15 +83,6 @@ const canDial = computed(() => normalizedDigits.value.length > 0 && !isDialing.v
 const isUssd = (value: string) => value.startsWith('*') || value.startsWith('#')
 
 const shouldPrepareOutgoingAudio = () => hasBrowserAmrCodec() && wifiCallingConnected.value
-
-const timestampLabel = (value: string) => {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleString()
-}
-
-const directionLabel = (call: CallRecord) =>
-  call.direction === 'incoming' ? t('modemDetail.phone.incoming') : t('modemDetail.phone.outgoing')
 
 const appendDigit = (value: string) => {
   digits.value += value
@@ -216,6 +209,12 @@ watch(
   },
   { immediate: true },
 )
+
+watch(dialpadOpen, async (open) => {
+  if (!open) return
+  await nextTick()
+  dialInputRef.value?.focus()
+})
 </script>
 
 <template>
@@ -282,13 +281,12 @@ watch(
                 {{ primaryLine(call) }}
               </span>
               <span class="shrink-0 text-xs font-medium text-muted-foreground">
-                {{ timestampLabel(call.updatedAt) }}
+                {{ formatListTimestamp(call.updatedAt) }}
               </span>
             </span>
             <span class="flex min-w-0 items-center justify-between gap-3">
               <span class="block truncate text-xs text-muted-foreground">
-                {{ directionLabel(call) }} · {{ stateLabel(call.state) }} ·
-                {{ routeLabel(call.route) }}
+                {{ stateLabel(call.state) }} · {{ routeLabel(call.route) }}
               </span>
               <span v-if="callDurationLabel(call)" class="shrink-0 text-xs text-muted-foreground">{{
                 callDurationLabel(call)
@@ -315,7 +313,9 @@ watch(
     </DraggableFab>
 
     <Dialog v-model:open="dialpadOpen">
-      <DialogContent class="rounded-2xl sm:max-w-xs">
+      <DialogContent
+        class="min-h-[min(82dvh,42rem)] w-[min(calc(100%-3rem),20rem)] max-w-none grid-rows-[auto_1fr] rounded-2xl p-5 sm:max-w-none"
+      >
         <DialogHeader>
           <DialogTitle>{{ t('modemDetail.phone.dialpad') }}</DialogTitle>
           <DialogDescription>
@@ -323,16 +323,23 @@ watch(
           </DialogDescription>
         </DialogHeader>
 
-        <div class="space-y-5">
-          <div
-            class="flex min-h-12 items-center justify-center gap-2 text-center text-3xl font-semibold tracking-normal"
-          >
-            <span class="break-all">{{ digits || t('modemDetail.phone.numberPlaceholder') }}</span>
+        <div class="flex min-h-0 flex-col justify-between gap-6">
+          <div class="relative flex min-h-24 items-center">
+            <input
+              ref="dialInputRef"
+              v-model="digits"
+              type="tel"
+              inputmode="tel"
+              autocomplete="tel"
+              class="h-20 w-full bg-transparent px-12 text-center text-3xl font-semibold tracking-normal outline-none"
+              :aria-label="t('modemDetail.phone.numberPlaceholder')"
+              @keydown.enter.prevent="startDial"
+            />
             <Button
               v-if="digits"
               size="icon"
               variant="ghost"
-              class="touch-manipulation"
+              class="absolute top-1/2 right-0 -translate-y-1/2 touch-manipulation"
               :aria-label="t('modemDetail.phone.backspace')"
               @click="backspace"
             >
@@ -340,12 +347,12 @@ watch(
             </Button>
           </div>
 
-          <div class="mx-auto grid w-full max-w-72 grid-cols-3 gap-2 sm:max-w-56">
+          <div class="mx-auto grid w-full max-w-60 grid-cols-3 gap-4">
             <button
               v-for="key in keys"
               :key="key.value"
               type="button"
-              class="flex aspect-square min-h-0 touch-manipulation select-none flex-col items-center justify-center rounded-full bg-muted text-xl font-semibold transition hover:bg-muted/70 active:scale-95"
+              class="flex aspect-square min-h-0 touch-manipulation select-none flex-col items-center justify-center rounded-full bg-muted text-lg font-semibold transition hover:bg-muted/70 active:scale-95"
               @click="appendKey(key.value)"
               @pointerdown="startPlusLongPress(key.value)"
               @pointerup="clearPlusLongPress"
@@ -362,12 +369,12 @@ watch(
           <div class="flex items-center justify-center">
             <Button
               size="icon-lg"
-              class="size-16 touch-manipulation rounded-full bg-emerald-600 hover:bg-emerald-700"
+              class="size-11 touch-manipulation rounded-full bg-emerald-600 hover:bg-emerald-700"
               :disabled="!canDial"
               :aria-label="t('modemDetail.phone.call')"
               @click="startDial"
             >
-              <PhoneCall v-if="!isDialing" class="size-8" />
+              <PhoneCall v-if="!isDialing" class="size-5" />
               <Spinner v-else class="size-6" />
             </Button>
           </div>

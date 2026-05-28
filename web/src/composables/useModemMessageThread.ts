@@ -3,7 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { useMessageApi } from '@/apis/message'
-import { formatMessageTimestamp } from '@/lib/datetime'
+import { formatListTimestamp } from '@/lib/datetime'
 import type { MessageResponse } from '@/types/message'
 
 export type ThreadMessageItem = {
@@ -49,7 +49,7 @@ export const useModemMessageThread = ({
       key: String(message.id),
       incoming: message.incoming,
       text: message.text,
-      timestampLabel: formatMessageTimestamp(message.timestamp),
+      timestampLabel: formatListTimestamp(message.timestamp),
       status: message.status,
       wifiCalling: message.wifiCalling,
     })),
