@@ -156,7 +156,7 @@ const en = {
           smtpUsername: {
             label: 'SMTP username',
             description: 'SMTP username.',
-            placeholder: 'user@example.com',
+            placeholder: "user{'@'}example.com",
           },
           smtpPassword: {
             label: 'SMTP password',
@@ -165,7 +165,7 @@ const en = {
           from: {
             label: 'From',
             description: 'Sender address.',
-            placeholder: 'Sigmo <sigmo@example.com>',
+            placeholder: "Sigmo <sigmo{'@'}example.com>",
           },
           recipients: {
             label: 'Recipients',

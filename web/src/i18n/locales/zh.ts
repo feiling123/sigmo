@@ -156,7 +156,7 @@ const zh = {
           smtpUsername: {
             label: 'SMTP 用户名',
             description: 'SMTP 用户名。',
-            placeholder: 'user@example.com',
+            placeholder: "user{'@'}example.com",
           },
           smtpPassword: {
             label: 'SMTP 密码',
@@ -165,7 +165,7 @@ const zh = {
           from: {
             label: '发件人',
             description: '发件人地址。',
-            placeholder: 'Sigmo <sigmo@example.com>',
+            placeholder: "Sigmo <sigmo{'@'}example.com>",
           },
           recipients: {
             label: '接收人',

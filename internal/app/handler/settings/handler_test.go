@@ -30,6 +30,7 @@ func TestSettingsSchema(t *testing.T) {
 		wantKind  string
 	}{
 		{name: "telegram bot token is password", channel: "telegram", wantField: "botToken", wantKind: controlPassword},
+		{name: "email smtp username is text", channel: "email", wantField: "smtpUsername", wantKind: controlText},
 		{name: "email tls policy is select", channel: "email", wantField: "tlsPolicy", wantKind: controlSelect},
 		{name: "email ssl is switch", channel: "email", wantField: "ssl", wantKind: controlSwitch},
 		{name: "http headers are key value", channel: "http", wantField: "headers", wantKind: controlKeyValue},

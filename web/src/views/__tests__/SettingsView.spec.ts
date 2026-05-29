@@ -129,6 +129,36 @@ const response = (): SettingsResponse => ({
         label: 'Email',
         fields: [
           {
+            key: 'smtpHost',
+            label: 'SMTP host',
+            control: 'text',
+          },
+          {
+            key: 'smtpPort',
+            label: 'SMTP port',
+            control: 'number',
+          },
+          {
+            key: 'smtpUsername',
+            label: 'SMTP username',
+            control: 'text',
+          },
+          {
+            key: 'smtpPassword',
+            label: 'SMTP password',
+            control: 'password',
+          },
+          {
+            key: 'from',
+            label: 'From',
+            control: 'text',
+          },
+          {
+            key: 'recipients',
+            label: 'Recipients',
+            control: 'list',
+          },
+          {
             key: 'tlsPolicy',
             label: 'TLS policy',
             control: 'select',
@@ -137,6 +167,11 @@ const response = (): SettingsResponse => ({
               { label: 'Opportunistic', value: 'opportunistic' },
               { label: 'None', value: 'none' },
             ],
+          },
+          {
+            key: 'ssl',
+            label: 'SSL',
+            control: 'switch',
           },
         ],
       },
@@ -302,6 +337,41 @@ describe('SettingsView', () => {
     expect(trigger.exists()).toBe(true)
     expect(trigger.attributes('role')).toBe('combobox')
     expect(wrapper.find('select').exists()).toBe(false)
+  })
+
+  it('renders and saves email smtp username', async () => {
+    const settings = response()
+    settings.values.channels = {
+      email: {
+        enabled: true,
+        smtpHost: 'smtp.example.com',
+        smtpPort: 587,
+        smtpUsername: 'old@example.com',
+        smtpPassword: 'secret',
+        from: 'Sigmo <sigmo@example.com>',
+        recipients: ['ops@example.com'],
+        tlsPolicy: 'opportunistic',
+      },
+    }
+
+    const wrapper = await mountView(settings)
+
+    const username = wrapper.find('input#settings-channel-email-smtpUsername')
+    expect(username.exists()).toBe(true)
+    expect(username.attributes('type')).toBe('text')
+    expect((username.element as HTMLInputElement).value).toBe('old@example.com')
+
+    await username.setValue('new@example.com')
+    const saveButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.save'))
+    expect(saveButton).toBeDefined()
+    await saveButton?.trigger('click')
+    await flushPromises()
+
+    expect(api.updateSettings).toHaveBeenCalledTimes(1)
+    const payload = api.updateSettings.mock.calls[0]?.[0] as SettingsValues
+    expect(payload.channels.email?.smtpUsername).toBe('new@example.com')
   })
 
   it('selects the desktop nav item for the visible section while scrolling', async () => {
