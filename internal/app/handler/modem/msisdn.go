@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	msisdnclient "github.com/damonto/sigmo/internal/pkg/modem/msisdn"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 var errMSISDNInvalidNumber = errors.New("invalid phone number")
@@ -18,7 +18,7 @@ var errMSISDNInvalidNumber = errors.New("invalid phone number")
 var msisdnPhoneRE = regexp.MustCompile(`^\+?[0-9]{1,15}$`)
 
 type msisdn struct {
-	store        *config.Store
+	store        *settings.Store
 	newClient    msisdnClientFactory
 	restartModem func(context.Context, *mmodem.Modem, bool) error
 	waitForModem func(context.Context, *mmodem.Modem, func() error) (*mmodem.Modem, error)
@@ -31,7 +31,7 @@ type msisdnClient interface {
 
 type msisdnClientFactory func(string) (msisdnClient, error)
 
-func newMSISDN(store *config.Store, registry *mmodem.Registry) *msisdn {
+func newMSISDN(store *settings.Store, registry *mmodem.Registry) *msisdn {
 	return &msisdn{
 		store: store,
 		newClient: func(device string) (msisdnClient, error) {

@@ -9,19 +9,19 @@ import (
 	"strings"
 
 	"github.com/damonto/sigmo/internal/pkg/carrier"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 type catalog struct {
-	store       *config.Store
+	store       *settings.Store
 	registry    *mmodem.Registry
 	wifiCalling wificalling.Coordinator
 }
 
-func newCatalog(store *config.Store, registry *mmodem.Registry, wifiCalling wificalling.Coordinator) *catalog {
+func newCatalog(store *settings.Store, registry *mmodem.Registry, wifiCalling wificalling.Coordinator) *catalog {
 	return &catalog{
 		store:       store,
 		registry:    registry,
@@ -167,9 +167,9 @@ func (c *catalog) buildSlotsResponse(ctx context.Context, device *mmodem.Modem) 
 	return simSlots, nil
 }
 
-func supportsEsim(m *mmodem.Modem, store *config.Store) (bool, error) {
-	cfg := store.Snapshot()
-	client, err := lpa.New(m, &cfg)
+func supportsEsim(m *mmodem.Modem, store *settings.Store) (bool, error) {
+	current := store.Snapshot()
+	client, err := lpa.New(m, &current)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return false, nil

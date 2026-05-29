@@ -51,11 +51,7 @@ if [ "${SIGMO_START_MODEMMANAGER:-1}" = "1" ]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-	if [ -f /app/config.toml ]; then
-		set -- /app/sigmo --config /app/config.toml
-	else
-		set -- /app/sigmo
-	fi
+	set -- /app/sigmo
 fi
 
 exec "$@"

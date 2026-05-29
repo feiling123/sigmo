@@ -16,8 +16,8 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-func (s *Service) downloadEnableAndComplete(ctx context.Context, session *session, active *activeSession, result *ts43.Result, cfg ts43.DownloadConfig) (*ts43.Result, error) {
-	iccid, err := s.downloadProfile(ctx, session, active.target, active.targetClient, cfg)
+func (s *Service) downloadEnableAndComplete(ctx context.Context, session *session, active *activeSession, result *ts43.Result, downloadConfig ts43.DownloadConfig) (*ts43.Result, error) {
+	iccid, err := s.downloadProfile(ctx, session, active.target, active.targetClient, downloadConfig)
 	active.CloseTarget()
 	if err != nil {
 		return result, err
@@ -34,8 +34,8 @@ func (s *Service) downloadEnableAndComplete(ctx context.Context, session *sessio
 	return next, err
 }
 
-func (s *Service) downloadProfile(ctx context.Context, session *session, target *mmodem.Modem, client *ilpa.LPA, cfg ts43.DownloadConfig) (sgp22.ICCID, error) {
-	ac, err := activationCode(cfg)
+func (s *Service) downloadProfile(ctx context.Context, session *session, target *mmodem.Modem, client *ilpa.LPA, downloadConfig ts43.DownloadConfig) (sgp22.ICCID, error) {
+	ac, err := activationCode(downloadConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -72,8 +72,8 @@ func (s *Service) downloadProfile(ctx context.Context, session *session, target 
 			}
 		}
 	}
-	if len(iccid) == 0 && cfg.ProfileICCID != "" {
-		parsed, err := sgp22.NewICCID(cfg.ProfileICCID)
+	if len(iccid) == 0 && downloadConfig.ProfileICCID != "" {
+		parsed, err := sgp22.NewICCID(downloadConfig.ProfileICCID)
 		if err != nil {
 			return nil, fmt.Errorf("parse transferred ICCID: %w", err)
 		}
@@ -92,22 +92,22 @@ func (s *Service) enableTargetProfile(ctx context.Context, target *mmodem.Modem,
 	return s.enableProfile(ctx, target, iccid)
 }
 
-func activationCode(cfg ts43.DownloadConfig) (*elpa.ActivationCode, error) {
-	if cfg.ActivationCode != "" {
+func activationCode(downloadConfig ts43.DownloadConfig) (*elpa.ActivationCode, error) {
+	if downloadConfig.ActivationCode != "" {
 		var ac elpa.ActivationCode
-		if err := ac.UnmarshalText([]byte(cfg.ActivationCode)); err != nil {
+		if err := ac.UnmarshalText([]byte(downloadConfig.ActivationCode)); err != nil {
 			return nil, err
 		}
-		ac.IMEI = cfg.IMEI
+		ac.IMEI = downloadConfig.IMEI
 		return &ac, nil
 	}
-	smdp, err := parseSMDP(cfg.SMDPFQDN)
+	smdp, err := parseSMDP(downloadConfig.SMDPFQDN)
 	if err != nil {
 		return nil, err
 	}
 	return &elpa.ActivationCode{
 		SMDP:       smdp,
-		MatchingID: cfg.MatchingID,
-		IMEI:       cfg.IMEI,
+		MatchingID: downloadConfig.MatchingID,
+		IMEI:       downloadConfig.IMEI,
 	}, nil
 }

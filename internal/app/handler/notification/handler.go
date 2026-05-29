@@ -11,9 +11,9 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type Handler struct {
@@ -35,7 +35,7 @@ var (
 	errInvalidSequence  = errors.New("invalid sequence number")
 )
 
-func New(store *config.Store, registry *mmodem.Registry) *Handler {
+func New(store *settings.Store, registry *mmodem.Registry) *Handler {
 	return &Handler{
 		registry:      registry,
 		notifications: newNotification(store),

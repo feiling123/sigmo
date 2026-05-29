@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import ConfigField from '@/components/config/ConfigField.vue'
-import type { ConfigRootSection } from '@/composables/useConfigForm'
-import type { ConfigField as ConfigFieldSchema } from '@/types/config'
+import SettingsField from '@/components/settings/SettingsField.vue'
+import type { SettingsRootSection } from '@/composables/useSettingsForm'
+import type { SettingsField as SettingsFieldSchema } from '@/types/settings'
 
 const props = defineProps<{
   id: string
-  section: ConfigRootSection
+  section: SettingsRootSection
   title: string
   description: string
-  fields: ConfigFieldSchema[]
+  fields: SettingsFieldSchema[]
   values: object | null
   disabled?: boolean
 }>()
@@ -18,7 +18,7 @@ const emit = defineEmits<{
 }>()
 
 const fieldID = (key: string) => {
-  return `config-${props.section}-${key}`
+  return `settings-${props.section}-${key}`
 }
 
 const fieldValue = (key: string) => {
@@ -34,7 +34,7 @@ const fieldValue = (key: string) => {
     </div>
 
     <div class="grid gap-4 sm:grid-cols-2">
-      <ConfigField
+      <SettingsField
         v-for="field in fields"
         :id="fieldID(field.key)"
         :key="field.key"

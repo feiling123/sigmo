@@ -11,9 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	notifywebhook "github.com/damonto/sigmo/internal/pkg/notify/webhook"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type senderFunc func(ctx context.Context, event notifyevent.Event) error
@@ -129,8 +129,8 @@ func TestNewSkipsDisabledChannels(t *testing.T) {
 	t.Parallel()
 
 	enabled := false
-	notifier, err := New(&config.Config{
-		Channels: map[string]config.Channel{
+	notifier, err := New(&settings.Settings{
+		Channels: map[string]settings.Channel{
 			"telegram": {
 				Enabled:  &enabled,
 				BotToken: "draft-token",
@@ -168,7 +168,7 @@ func TestHTTPSend(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sender, err := notifywebhook.New(&config.Channel{
+	sender, err := notifywebhook.New(&settings.Channel{
 		Endpoint: server.URL,
 		Headers: map[string]string{
 			"Authorization": "Bearer secret",

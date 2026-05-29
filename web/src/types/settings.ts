@@ -1,18 +1,16 @@
-export type ConfigApp = {
-  environment: string
-  listenAddress: string
+export type SettingsApp = {
   authProviders: string[]
   otpRequired: boolean
 }
 
-export type ConfigProxy = {
+export type SettingsProxy = {
   listenAddress: string
   httpPort: number
   socks5Port: number
   password: string
 }
 
-export type ConfigChannel = {
+export type SettingsChannel = {
   enabled?: boolean
   endpoint?: string
   botToken?: string
@@ -28,13 +26,13 @@ export type ConfigChannel = {
   priority?: number
 }
 
-export type ConfigValues = {
-  app: ConfigApp
-  proxy: ConfigProxy
-  channels: Record<string, ConfigChannel>
+export type SettingsValues = {
+  app: SettingsApp
+  proxy: SettingsProxy
+  channels: Record<string, SettingsChannel>
 }
 
-export type ConfigFieldControl =
+export type SettingsFieldControl =
   | 'text'
   | 'password'
   | 'number'
@@ -44,40 +42,38 @@ export type ConfigFieldControl =
   | 'keyValue'
   | 'channelList'
 
-export type ConfigOption = {
+export type SettingsOption = {
   label: string
   value: string
 }
 
-export type ConfigField = {
+export type SettingsField = {
   key: string
   label: string
   description?: string
-  control: ConfigFieldControl
+  control: SettingsFieldControl
   required?: boolean
   secret?: boolean
   placeholder?: string
   min?: number
   max?: number
-  options?: ConfigOption[]
+  options?: SettingsOption[]
 }
 
-export type ConfigChannelSchema = {
+export type SettingsChannelSchema = {
   key: string
   label: string
   description?: string
-  fields: ConfigField[]
+  fields: SettingsField[]
 }
 
-export type ConfigSchema = {
-  app: ConfigField[]
-  proxy: ConfigField[]
-  channels: ConfigChannelSchema[]
+export type SettingsSchema = {
+  app: SettingsField[]
+  proxy: SettingsField[]
+  channels: SettingsChannelSchema[]
 }
 
-export type ConfigResponse = {
-  path: string
-  schema: ConfigSchema
-  values: ConfigValues
-  restartRequiredFields?: string[]
+export type SettingsResponse = {
+  schema: SettingsSchema
+  values: SettingsValues
 }

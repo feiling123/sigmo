@@ -17,9 +17,9 @@ const router = createRouter({
       component: () => import('@/views/HomeView.vue'),
     },
     {
-      path: '/config',
-      name: 'config',
-      component: () => import('@/views/ConfigView.vue'),
+      path: '/settings',
+      name: 'settings',
+      component: () => import('@/views/SettingsView.vue'),
     },
     {
       path: '/modems/:id',

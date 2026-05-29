@@ -671,7 +671,6 @@ func TestStopFailsOpenCallsBeforeRemovingSession(t *testing.T) {
 				cancel: func() {
 					cancelled = true
 				},
-				client:    &vowifi.Client{},
 				connected: true,
 				calls: map[string]*voiceCallState{
 					"active": {

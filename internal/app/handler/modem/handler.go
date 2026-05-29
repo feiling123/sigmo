@@ -9,9 +9,9 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
@@ -20,7 +20,7 @@ type Handler struct {
 	catalog     *catalog
 	simSlot     *simSlot
 	msisdn      *msisdn
-	settings    *settings
+	settings    *modemSettings
 	internet    *internet.Connector
 	wifiCalling wificalling.Coordinator
 }
@@ -58,7 +58,7 @@ var (
 	errUpdateMSISDNTimeout  = errors.New("updating MSISDN timed out, please refresh to confirm the active slot")
 )
 
-func New(store *config.Store, registry *mmodem.Registry, internetConnector *internet.Connector, wifiCalling wificalling.Coordinator) *Handler {
+func New(store *settings.Store, registry *mmodem.Registry, internetConnector *internet.Connector, wifiCalling wificalling.Coordinator) *Handler {
 	return &Handler{
 		registry:    registry,
 		catalog:     newCatalog(store, registry, wifiCalling),
@@ -166,7 +166,7 @@ func (h *Handler) UpdateSettings(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateSettingsInvalidRequest); err != nil {
 		return err
 	}
-	if err := h.settings.Update(modem, req); err != nil {
+	if err := h.settings.Update(c.Request().Context(), modem, req); err != nil {
 		if errors.Is(err, errCompatibleRequired) {
 			return httpapi.BadRequest(c, errorCodeCompatibleRequired, err)
 		}

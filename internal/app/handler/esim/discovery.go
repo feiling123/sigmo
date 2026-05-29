@@ -7,22 +7,22 @@ import (
 
 	sgp22 "github.com/damonto/euicc-go/v2"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type provisioning struct {
-	store *config.Store
+	store *settings.Store
 }
 
-func newProvisioning(store *config.Store) *provisioning {
+func newProvisioning(store *settings.Store) *provisioning {
 	return &provisioning{store: store}
 }
 
 func (p *provisioning) Discovery(ctx context.Context, modem *mmodem.Modem) ([]DiscoverResponse, error) {
-	cfg := p.store.Snapshot()
-	client, err := lpa.New(modem, &cfg)
+	current := p.store.Snapshot()
+	client, err := lpa.New(modem, &current)
 	if err != nil {
 		return nil, fmt.Errorf("create LPA client: %w", err)
 	}

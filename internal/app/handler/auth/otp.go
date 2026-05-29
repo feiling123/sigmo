@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/damonto/sigmo/internal/app/auth"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/notify"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 var (
@@ -20,31 +20,31 @@ var (
 )
 
 type otp struct {
-	configStore *config.Store
-	store       *auth.Store
+	settingsStore *settings.Store
+	store         *auth.Store
 }
 
-func newOTP(configStore *config.Store, store *auth.Store) *otp {
+func newOTP(settingsStore *settings.Store, store *auth.Store) *otp {
 	return &otp{
-		configStore: configStore,
-		store:       store,
+		settingsStore: settingsStore,
+		store:         store,
 	}
 }
 
 func (o *otp) Required() bool {
-	return o.configStore.OTPRequired()
+	return o.settingsStore.OTPRequired()
 }
 
 func (o *otp) Send(ctx context.Context) error {
-	cfg := o.configStore.Snapshot()
-	if !cfg.App.OTPRequired {
+	current := o.settingsStore.Snapshot()
+	if !current.App.OTPRequired {
 		return nil
 	}
-	authProviders, err := enabledAuthProviders(cfg)
+	authProviders, err := enabledAuthProviders(current)
 	if err != nil {
 		return err
 	}
-	notifier, err := notify.New(&cfg)
+	notifier, err := notify.New(&current)
 	if err != nil {
 		return fmt.Errorf("create notifier: %w", err)
 	}
@@ -58,17 +58,17 @@ func (o *otp) Send(ctx context.Context) error {
 	return nil
 }
 
-func enabledAuthProviders(cfg config.Config) ([]string, error) {
-	if len(cfg.App.AuthProviders) == 0 {
+func enabledAuthProviders(current settings.Settings) ([]string, error) {
+	if len(current.App.AuthProviders) == 0 {
 		return nil, errAuthProviderRequired
 	}
-	providers := make([]string, 0, len(cfg.App.AuthProviders))
-	for _, provider := range cfg.App.AuthProviders {
+	providers := make([]string, 0, len(current.App.AuthProviders))
+	for _, provider := range current.App.AuthProviders {
 		name := strings.ToLower(strings.TrimSpace(provider))
 		if name == "" {
 			return nil, errAuthProviderRequired
 		}
-		if !channelEnabled(cfg.Channels, name) {
+		if !channelEnabled(current.Channels, name) {
 			return nil, fmt.Errorf("%w: %s", errAuthProviderUnavailable, name)
 		}
 		providers = append(providers, name)
@@ -76,7 +76,7 @@ func enabledAuthProviders(cfg config.Config) ([]string, error) {
 	return providers, nil
 }
 
-func channelEnabled(channels map[string]config.Channel, target string) bool {
+func channelEnabled(channels map[string]settings.Channel, target string) bool {
 	for name, channel := range channels {
 		if strings.EqualFold(strings.TrimSpace(name), target) {
 			return channel.IsEnabled()

@@ -70,16 +70,16 @@ sudo install -m 0755 sigmo-linux-amd64 /usr/local/bin/sigmo
 
 ### 2. Configure
 
-Sigmo can start without a config file. If `--config` is not provided, it creates
-`$HOME/.config/sigmo/config.toml` with safe defaults. You can also pass an
-explicit config path if you prefer managing the file yourself.
+Sigmo uses command-line flags for startup settings and stores runtime settings
+in SQLite. On first start, login OTP is disabled so you can open the Web UI and
+configure notification channels and authentication.
 
 ### 3. Run
 
 Start the service.
 
 ```bash
-/usr/local/bin/sigmo
+/usr/local/bin/sigmo --listen-address=0.0.0.0:9527 --db-path=/var/lib/sigmo/sigmo.db
 ```
 
 Visit `http://localhost:9527` to access the UI.
@@ -88,10 +88,11 @@ Visit `http://localhost:9527` to access the UI.
 
 The Docker image includes the embedded Vue frontend and installs `dbus`, `ModemManager`, `qmi-utils`, and `libmbim-tools` in the runtime image.
 
-1.  **Config**:
+1.  **Data**:
 
-    The compose setup mounts `./config` to the container config directory.
-    Sigmo creates `./config/config.toml` on first start if it does not exist.
+    The compose setup mounts `./data` to the container data directory.
+    Sigmo stores application settings, messages, calls, internet preferences,
+    and network preferences in SQLite.
 
 2.  **Start**:
 
@@ -101,13 +102,15 @@ The Docker image includes the embedded Vue frontend and installs `dbus`, `ModemM
     ```
 
 3.  **Open UI**:
-    Visit `http://localhost:9527`, or the port configured by `[app].listen_address`.
+    Visit `http://localhost:9527`, or pass `--listen-address` to choose another address.
 
-The compose setup uses `network_mode: host` because Sigmo's internet connection feature configures the modem network interface and host routes. Docker port publishing is disabled in this mode; use `[app].listen_address` in `config.toml` to choose the listening address and port.
+The compose setup uses `network_mode: host` because Sigmo's internet connection feature configures the modem network interface and host routes. Docker port publishing is disabled in this mode; use `--listen-address` to choose the listening address and port.
 
 The container runs with `privileged: true` so Sigmo and ModemManager can access modem devices. `/run` is mounted as tmpfs so stale D-Bus sockets cannot survive container restarts. On hosts with strict Docker or udev policies, keep `/dev`, `/run/udev`, and `/sys` mounted as shown in `compose.yaml`.
 
-If you enable **Always On** for an internet connection, Sigmo stores the last connection settings in the XDG state directory (`$XDG_STATE_HOME/sigmo/internet-always-on.json`, or `$HOME/.local/state/sigmo/internet-always-on.json`). Sigmo also stores modem network Mode/Bands preferences in the same state directory (`network-preferences.json`) so they can be restored after modem reloads, program restarts, and system reboots. In the Docker image, the default state directory is `/root/.local/state/sigmo`; mount that directory as a volume if you want Docker container recreation to preserve boot-time internet auto-connect settings and network preferences.
+Sigmo stores Internet Always On settings, modem network Mode/Bands preferences,
+and manual network registration preferences in SQLite so they can be restored
+after modem reloads, program restarts, and system reboots.
 
 ---
 
@@ -162,145 +165,28 @@ Usage flow:
 5. Send SMS, run USSD, or place calls as usual. When the preference toggle is enabled and Wi-Fi Calling is connected, Sigmo routes those actions through Wi-Fi Calling.
 
 Wi-Fi Calling settings are stored per profile in Sigmo's application database.
-They are not written to the `[modems]` section of `config.toml`.
 
 ---
 
 ## ⚙️ Configuration Reference
 
-Sigmo runs using a TOML configuration file. When `--config` is omitted, the default is `$HOME/.config/sigmo/config.toml`.
+Startup configuration is provided through flags:
 
-> **⚠️ Important**: This file is **Read-Write**.
-> When you update modem aliases or settings via the Web UI, Sigmo **writes the changes back** to this file. Ensure the Sigmo process has **write permissions** to the config file.
+| Flag                 | Default                          | Description                                      |
+| :------------------- | :------------------------------- | :----------------------------------------------- |
+| `--listen-address`   | `0.0.0.0:9527`                   | HTTP bind address.                               |
+| `--db-path`          | `$XDG_DATA_HOME/sigmo/sigmo.db`  | SQLite database path.                            |
+| `--debug`            | `false`                          | Enable debug logging and internal API errors.    |
+| `--version`          | `false`                          | Print the build version and exit.                |
 
-Internet **Always On** state is not stored in this config file. Sigmo keeps the last Always On connection settings in the XDG state directory so it can reconnect after an unexpected disconnect or system restart.
+Runtime settings are managed in the Web UI and stored in SQLite:
 
-### 1. `[app]` General Settings
-
-Controls the core application behavior, network binding, and security policies.
-
-```toml
-[app]
-  environment = "production"
-  listen_address = "0.0.0.0:9527"
-  auth_providers = ["telegram", "email"]
-  otp_required = true
-```
-
-| Parameter            | Type    | Description                                                                                                                                                      |
-| :------------------- | :------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`environment`**    | String  | The running environment. Set to `"production"` to minimize logs (recommended). Set to `"development"` to enable verbose debug logging.                           |
-| **`listen_address`** | String  | The IP and Port to bind the HTTP server. <br>`0.0.0.0:9527` listens on all interfaces.<br>`127.0.0.1:9527` restricts access to localhost.                        |
-| **`auth_providers`** | Array   | **Allowed login channels**. The values listed here must match the configuration block names in `[channels]` (e.g., `telegram`, `bark`, `email`).                 |
-| **`otp_required`**   | Boolean | Enforce OTP (One-Time Password) for login. <br>`true`: Secure mode (Recommended).<br>`false`: No login required (Insecure, for isolated internal networks only). |
-
-### 2. `[channels]` Notification & Auth
-
-Configures channels used for receiving **Login OTPs** and **Forwarded SMS**.
-
-> **Note**: Each channel supports `enabled`. Existing configs without this option are treated as enabled. Set `enabled = false` to keep channel settings while disabling OTP and SMS delivery for that channel.
-
-#### Telegram
-
-```toml
-[channels.telegram]
-  enabled = true
-  bot_token = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-  recipients = ["123456789", "987654321"]
-```
-
-- `enabled`: Enable this channel. Set to `false` to keep the settings but stop using it.
-- `bot_token`: The token received from @BotFather.
-- `recipients`: Array of Strings Chat IDs authorized to receive messages.
-
-#### Bark (iOS Push)
-
-```toml
-[channels.bark]
-  endpoint = "https://api.day.app"
-  recipients = ["device_key_1", "device_key_2"]
-```
-
-- `endpoint`: Bark server URL. Leave empty to use the official `https://api.day.app`. Sigmo automatically appends `/push`.
-- `recipients`: List of Device Keys from the Bark App.
-
-#### Gotify (Self-Hosted)
-
-```toml
-[channels.gotify]
-  endpoint = "https://push.example.com"
-  recipients = ["AsDh82..."]
-  priority = 5
-```
-
-- `endpoint`: Base URL of your Gotify server (do not add `/message`; it is appended automatically).
-- `recipients`: List of Gotify **Application Tokens**.
-- `priority`: Message priority (Integer), default is 5.
-
-#### ServerChan (SendKey)
-
-```toml
-[channels.sc3]
-  endpoint = "https://<uid>.push.ft07.com/send/<sendkey>.send"
-```
-
-- `endpoint`: The full URL including the SendKey.
-
-#### HTTP (Webhook)
-
-```toml
-[channels.http]
-  endpoint = "https://httpbin.org/post"
-  [channels.http.headers]
-    Authorization = "Bearer secret_token"
-    Content-Type = "application/json"
-```
-
-- `endpoint`: The target Webhook URL.
-- `headers`: Key-Value pairs for custom HTTP headers. Sigmo sends a JSON envelope like `{"kind":"otp","payload":{...}}` or `{"kind":"sms","payload":{...}}`.
-
-#### Email (SMTP)
-
-```toml
-[channels.email]
-  smtp_host = "smtp.gmail.com"
-  smtp_port = 587
-  smtp_username = "yourname@gmail.com"
-  smtp_password = "app_password"
-  from = "Sigmo <yourname@gmail.com>"
-  recipients = ["admin@example.com"]
-  tls_policy = "mandatory"
-  ssl = false
-```
-
-- `smtp_host` / `smtp_port`: Server address and port.
-- `smtp_username` / `smtp_password`: Credentials (App Passwords are recommended).
-- `recipients`: List of email addresses to receive notifications.
-- `tls_policy`: STARTTLS enforcement.
-  - `mandatory`: Enforce TLS (Default, Recommended).
-  - `opportunistic`: Try TLS, fall back to plain text if unavailable.
-  - `none`: No TLS.
-- `ssl`: Use implicit SSL (usually for port 465). Set `true` for port 465. Set `false` for port 587 (when using `tls_policy`).
-
-### 3. `[modems]` Hardware Settings
-
-This section is **auto-generated** by Sigmo when you save settings in the Web UI. You generally do not need to write this manually.
-
-Entries are keyed by the ModemManager **Equipment Identifier**.
-
-```toml
-[modems]
-  [modems."123456789012345"]
-    alias = "Office 5G Stick"
-    compatible = false
-    mss = 240
-```
-
-| Parameter        | Type    | Default | Description                                                                                                                                                                                                                                          |
-| :--------------- | :------ | :------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`alias`**      | String  | (None)  | **Custom Name**. Displayed in the Web UI to help identify specific modems/SIMs.                                                                                                                                                                      |
-| **`compatible`** | Boolean | `false` | **Compatibility Mode**. Some older modems lose network connectivity after switching eSIM profiles unless fully rebooted. If enabled, Sigmo will try to restart the modem device after profile operations.                                            |
-| **`mss`**        | Int     | `240`   | **Max Segment Size**. Controls the APDU payload size (range 64-254) for SIM communication.<br>• If you experience errors during profile download, try lowering this value (e.g., 128 or 64).<br>• Most modern modems work fine with the default 240. |
+- Login OTP policy and auth providers.
+- Notification channels: Telegram, Bark, Gotify, ServerChan, HTTP webhook, and Email.
+- Internet proxy listener and password.
+- Modem alias, compatibility mode, and APDU MSS.
+- Internet APN preferences and Always On state.
+- Network mode, bands, and manual registration preferences.
 
 ---
 
@@ -320,7 +206,7 @@ To run Sigmo as a background service, use Systemd.
     sudo systemctl enable --now sigmo
     ```
 
-> **Note**: The default service runs as `root` to ensure access to ModemManager. If running as a non-root user, verify `udev` rules for the modem and file permissions for `/etc/sigmo/config.toml`.
+> **Note**: The default service runs as `root` to ensure access to ModemManager. If running as a non-root user, verify `udev` rules for the modem and write permissions for the SQLite database path.
 
 ---
 
@@ -329,20 +215,19 @@ To run Sigmo as a background service, use Systemd.
 If you wish to contribute or modify the source:
 
 1.  **Prerequisites**: Go 1.25+, Bun (for Vue).
-2.  **Setup Config**: `cp configs/config.example.toml config.toml`
-3.  **Build Frontend**:
+2.  **Build Frontend**:
     ```bash
     cd web && bun install && bun run build
     ```
-4.  **Run Backend**:
+3.  **Run Backend**:
 
     ```bash
-    go run ./ -config config.toml
+    go run ./ --listen-address=0.0.0.0:9527 --db-path=./sigmo.db --debug
     ```
 
     _Or for frontend hot-reload:_ `cd web && bun run dev`
 
-5.  **Private feature build**:
+4.  **Private feature build**:
 
     The public module does not build eSIM Transfer or Wi-Fi Calling by default.
     Private builds use `go.private.mod` and download the private TS.43 and VoWiFi
@@ -351,7 +236,7 @@ If you wish to contribute or modify the source:
     ```bash
     export GOPRIVATE=github.com/damonto/*
     source scripts/private-features.env
-    go run -tags="${PRIVATE_GO_TAGS}" -modfile="${PRIVATE_GO_MODFILE}" . -config config.toml
+    go run -tags="${PRIVATE_GO_TAGS}" -modfile="${PRIVATE_GO_MODFILE}" . --db-path=./sigmo.db --debug
     ```
 
     To use SSH for private modules locally:
@@ -361,7 +246,7 @@ If you wish to contribute or modify the source:
     git config --global url."git@github.com:damonto/".insteadOf "https://github.com/damonto/"
     source scripts/private-features.env
     go build -tags="${PRIVATE_GO_TAGS}" -modfile="${PRIVATE_GO_MODFILE}" -o sigmo .
-    sudo ./sigmo -config configs/config.toml
+    sudo ./sigmo --db-path=/var/lib/sigmo/sigmo.db
     ```
 
     Prefer building as your normal user and running the binary with `sudo`.

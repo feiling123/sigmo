@@ -6,10 +6,10 @@ import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import type { ConfigField } from '@/types/config'
+import type { SettingsField } from '@/types/settings'
 
 const props = defineProps<{
-  field: ConfigField
+  field: SettingsField
   modelValue: unknown
   disabled?: boolean
 }>()
@@ -83,7 +83,7 @@ const removeEntry = (key: string) => {
       <Label>{{ fieldLabel }}</Label>
       <Button type="button" variant="outline" size="sm" :disabled="disabled" @click="addEntry">
         <Plus class="size-4" />
-        {{ t('config.addHeader') }}
+        {{ t('settings.addHeader') }}
       </Button>
     </div>
     <div class="space-y-2">
@@ -104,7 +104,7 @@ const removeEntry = (key: string) => {
           size="icon"
           class="justify-self-end sm:justify-self-auto"
           :disabled="disabled"
-          :title="t('config.removeHeader')"
+          :title="t('settings.removeHeader')"
           @click="removeEntry(entry.key)"
         >
           <Trash2 class="size-4" />

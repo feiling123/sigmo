@@ -2,19 +2,19 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import ConfigField from '@/components/config/ConfigField.vue'
+import SettingsField from '@/components/settings/SettingsField.vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import type {
-  ConfigApp,
-  ConfigChannelSchema,
-  ConfigField as ConfigFieldSchema,
-} from '@/types/config'
+  SettingsApp,
+  SettingsChannelSchema,
+  SettingsField as SettingsFieldSchema,
+} from '@/types/settings'
 
 const props = defineProps<{
-  app: ConfigApp | null
-  enabledChannels: ConfigChannelSchema[]
-  fields: ConfigFieldSchema[]
+  app: SettingsApp | null
+  enabledChannels: SettingsChannelSchema[]
+  fields: SettingsFieldSchema[]
   disabled?: boolean
 }>()
 
@@ -30,7 +30,7 @@ const schemaText = (value: string | undefined) => {
 }
 
 const fieldID = (key: string, channel = '') => {
-  return channel ? `config-app-${channel}-${key}` : `config-app-${key}`
+  return channel ? `settings-app-${channel}-${key}` : `settings-app-${key}`
 }
 
 const fieldValue = (key: string) => {
@@ -60,8 +60,8 @@ const toggleAuthProvider = (channel: string, enabled: boolean) => {
 <template>
   <div class="space-y-4 border-t pt-5">
     <div>
-      <h3 class="text-sm font-semibold text-foreground">{{ t('config.authTitle') }}</h3>
-      <p class="text-sm text-muted-foreground">{{ t('config.authDescription') }}</p>
+      <h3 class="text-sm font-semibold text-foreground">{{ t('settings.authTitle') }}</h3>
+      <p class="text-sm text-muted-foreground">{{ t('settings.authDescription') }}</p>
     </div>
 
     <div v-for="field in fields" :key="field.key" class="space-y-2">
@@ -88,11 +88,11 @@ const toggleAuthProvider = (channel: string, enabled: boolean) => {
           </div>
         </div>
         <p v-else class="text-xs text-muted-foreground">
-          {{ t('config.noEnabledChannels') }}
+          {{ t('settings.noEnabledChannels') }}
         </p>
       </div>
 
-      <ConfigField
+      <SettingsField
         v-else
         :id="fieldID(field.key)"
         :field="field"

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -17,12 +18,13 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/damonto/sigmo/internal/app/forwarder"
+	hnetwork "github.com/damonto/sigmo/internal/app/handler/network"
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/app/router"
 	pcall "github.com/damonto/sigmo/internal/pkg/call"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/validator"
 	"github.com/damonto/sigmo/internal/pkg/websheet"
@@ -30,38 +32,35 @@ import (
 )
 
 var (
-	BuildVersion string
-	configPath   string
+	BuildVersion  string
+	listenAddress string
+	dbPath        string
+	debug         bool
+	showVersion   bool
 )
 
 func init() {
-	flag.StringVar(&configPath, "config", "", "path to config file")
+	flag.StringVar(&listenAddress, "listen-address", "0.0.0.0:9527", "HTTP listen address")
+	flag.StringVar(&dbPath, "db-path", "", "path to SQLite database")
+	flag.BoolVar(&debug, "debug", false, "enable debug logging and internal error responses")
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 }
 
 func main() {
 	flag.Parse()
-	configExplicit := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "config" {
-			configExplicit = true
-		}
-	})
-	cfg, err := loadConfig(configPath, configExplicit)
-	if err != nil {
-		slog.Error("unable to load config", "error", err)
-		os.Exit(1)
+	if showVersion {
+		fmt.Println(BuildVersion)
+		return
 	}
-	store := config.NewStore(cfg)
-	applyLogLevel(store)
-	httpapi.SetExposeInternalErrors(!store.IsProduction())
-	slog.Info("server starting", "version", BuildVersion)
+	applyLogLevel(debug)
+	httpapi.SetExposeInternalErrors(debug)
 
-	dbPath, err := cfg.DatabasePath()
+	resolvedDBPath, err := resolveDBPath(dbPath)
 	if err != nil {
 		slog.Error("configure storage", "error", err)
 		os.Exit(1)
 	}
-	db, err := storage.Open(context.Background(), dbPath)
+	db, err := storage.Open(context.Background(), resolvedDBPath)
 	if err != nil {
 		slog.Error("configure storage", "error", err)
 		os.Exit(1)
@@ -71,6 +70,13 @@ func main() {
 			slog.Warn("close storage", "error", err)
 		}
 	}()
+
+	store, err := settings.NewStore(context.Background(), db)
+	if err != nil {
+		slog.Error("load settings", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("server starting", "version", BuildVersion, "listen_address", listenAddress, "db_path", resolvedDBPath)
 
 	registry, err := modem.NewRegistry()
 	if err != nil {
@@ -97,10 +103,10 @@ func main() {
 	server.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		logged := requestLogger(next)
 		return func(c *echo.Context) error {
-			if store.IsProduction() {
-				return next(c)
+			if debug {
+				return logged(c)
 			}
-			return logged(c)
+			return next(c)
 		}
 	})
 	server.Use(middleware.RequestID())
@@ -135,8 +141,12 @@ func main() {
 		Websheets:  websheets,
 	})
 	callService := pcall.New(db, wifiCalling)
-	networkPreferences := modem.NewNetworkPreferencesWithStore(db)
-	router.Register(server, router.RegisterConfig{
+	networkPreferences, err := modem.NewNetworkPreferences(db)
+	if err != nil {
+		slog.Error("configure network preferences", "error", err)
+		os.Exit(1)
+	}
+	if err := router.Register(server, router.RegisterConfig{
 		Store:              store,
 		Registry:           registry,
 		Internet:           internetConnector,
@@ -146,7 +156,10 @@ func main() {
 		WiFiCalling:        wifiCalling,
 		Calls:              callService,
 		Websheets:          websheets,
-	})
+	}); err != nil {
+		slog.Error("configure router", "error", err)
+		os.Exit(1)
+	}
 
 	var wg sync.WaitGroup
 
@@ -169,6 +182,12 @@ func main() {
 	wg.Go(func() {
 		if err := networkPreferences.Run(ctx, registry); err != nil {
 			slog.Error("network preferences restore stopped", "error", err)
+		}
+	})
+
+	wg.Go(func() {
+		if err := hnetwork.RunRegistrationRestore(ctx, registry, db); err != nil {
+			slog.Error("network registration restore stopped", "error", err)
 		}
 	})
 
@@ -201,7 +220,7 @@ func main() {
 	})
 
 	startConfig := echo.StartConfig{
-		Address:         store.Snapshot().App.ListenAddress,
+		Address:         listenAddress,
 		HideBanner:      true,
 		GracefulTimeout: 5 * time.Second,
 	}
@@ -212,26 +231,53 @@ func main() {
 	wg.Wait()
 }
 
-func loadConfig(path string, explicit bool) (*config.Config, error) {
-	if explicit {
-		return config.Load(path)
+func resolveDBPath(path string) (string, error) {
+	if path != "" {
+		if filepath.IsAbs(path) {
+			return path, nil
+		}
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return "", fmt.Errorf("resolve db path: %w", err)
+		}
+		return abs, nil
 	}
-	defaultPath, err := config.DefaultPath()
+	dataDir, err := dataDir()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return config.LoadOrCreate(defaultPath)
+	return filepath.Join(dataDir, "sigmo", "sigmo.db"), nil
 }
 
-func applyLogLevel(store *config.Store) {
-	if store.IsProduction() {
-		slog.SetLogLoggerLevel(slog.LevelInfo)
+func dataDir() (string, error) {
+	if value := os.Getenv("XDG_DATA_HOME"); value != "" {
+		if !filepath.IsAbs(value) {
+			return "", fmt.Errorf("XDG_DATA_HOME %q is relative", value)
+		}
+		return value, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user home dir: %w", err)
+	}
+	if home == "" {
+		return "", errors.New("user home dir is empty")
+	}
+	if !filepath.IsAbs(home) {
+		return "", fmt.Errorf("user home dir %q is relative", home)
+	}
+	return filepath.Join(home, ".local", "share"), nil
+}
+
+func applyLogLevel(debug bool) {
+	if debug {
+		slog.SetLogLoggerLevel(slog.LevelDebug)
 		return
 	}
-	slog.SetLogLoggerLevel(slog.LevelDebug)
+	slog.SetLogLoggerLevel(slog.LevelInfo)
 }
 
-func newInternetConnector(store *config.Store, db *storage.Store) (*internet.Connector, error) {
+func newInternetConnector(store *settings.Store, db *storage.Store) (*internet.Connector, error) {
 	proxyConfig := store.ProxySettings()
 	proxy := internet.NewProxy(internet.ProxyConfig{
 		ListenAddress: proxyConfig.ListenAddress,

@@ -12,10 +12,10 @@ import (
 	"github.com/godbus/dbus/v5"
 
 	pcall "github.com/damonto/sigmo/internal/pkg/call"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/notify"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
@@ -23,7 +23,7 @@ import (
 const incomingNotificationFreshnessWindow = 30 * time.Minute
 
 type Relay struct {
-	store         *config.Store
+	store         *settings.Store
 	registry      *modem.Registry
 	notifier      *notify.Notifier
 	messages      *storage.Store
@@ -34,12 +34,12 @@ type Relay struct {
 	notifiedCalls map[string]struct{}
 }
 
-func New(store *config.Store, registry *modem.Registry, messages *storage.Store) (*Relay, error) {
+func New(store *settings.Store, registry *modem.Registry, messages *storage.Store) (*Relay, error) {
 	if messages == nil {
 		return nil, errors.New("message storage is required")
 	}
-	cfg := store.Snapshot()
-	notifier, err := notify.New(&cfg)
+	current := store.Snapshot()
+	notifier, err := notify.New(&current)
 	if err != nil {
 		return nil, fmt.Errorf("creating notifier: %w", err)
 	}
@@ -56,8 +56,8 @@ func New(store *config.Store, registry *modem.Registry, messages *storage.Store)
 }
 
 func (r *Relay) Reload() error {
-	cfg := r.store.Snapshot()
-	notifier, err := notify.New(&cfg)
+	current := r.store.Snapshot()
+	notifier, err := notify.New(&current)
 	if err != nil {
 		return fmt.Errorf("creating notifier: %w", err)
 	}

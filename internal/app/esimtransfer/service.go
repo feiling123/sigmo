@@ -14,9 +14,9 @@ import (
 	"github.com/damonto/ts43-go/ts43"
 	"github.com/gorilla/websocket"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/websheet"
 )
 
@@ -64,7 +64,7 @@ var (
 )
 
 type Config struct {
-	Store         *config.Store
+	Store         *settings.Store
 	Registry      *mmodem.Registry
 	EnableProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
 	DeleteProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
@@ -72,20 +72,20 @@ type Config struct {
 }
 
 type Service struct {
-	store         *config.Store
+	store         *settings.Store
 	registry      *mmodem.Registry
 	enableProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
 	deleteProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
 	websheets     *websheet.Broker
 }
 
-func New(cfg Config) *Service {
+func New(opts Config) *Service {
 	return &Service{
-		store:         cfg.Store,
-		registry:      cfg.Registry,
-		enableProfile: cfg.EnableProfile,
-		deleteProfile: cfg.DeleteProfile,
-		websheets:     cfg.Websheets,
+		store:         opts.Store,
+		registry:      opts.Registry,
+		enableProfile: opts.EnableProfile,
+		deleteProfile: opts.DeleteProfile,
+		websheets:     opts.Websheets,
 	}
 }
 
@@ -116,7 +116,7 @@ func (s *sourceEndpoint) Close() {
 }
 
 type activeSession struct {
-	cfg          *config.Config
+	settings     *settings.Settings
 	source       *sourceEndpoint
 	target       *mmodem.Modem
 	targetClient *ilpa.LPA
@@ -147,7 +147,7 @@ func (s *Service) Sources(ctx context.Context, target *mmodem.Modem) (SourcesRes
 	if err != nil {
 		return SourcesResponse{}, fmt.Errorf("list modems: %w", err)
 	}
-	cfg := s.configSnapshot()
+	currentSettings := s.settingsSnapshot()
 	response := make([]SourceResponse, 0, len(modems))
 	for _, modem := range modems {
 		if modem.EquipmentIdentifier == "" || modem.EquipmentIdentifier == target.EquipmentIdentifier {
@@ -156,7 +156,7 @@ func (s *Service) Sources(ctx context.Context, target *mmodem.Modem) (SourcesRes
 		response = append(response, SourceResponse{
 			Type:   SourceModem,
 			ID:     modem.EquipmentIdentifier,
-			Name:   modemName(cfg, modem),
+			Name:   modemName(currentSettings, modem),
 			Detail: modem.EquipmentIdentifier,
 		})
 	}
@@ -181,8 +181,8 @@ func (s *Service) Profiles(ctx context.Context, target *mmodem.Modem, req Profil
 	if err := validateTarget(target, Start{SourceType: req.SourceType, SourceID: req.SourceID}); err != nil {
 		return nil, err
 	}
-	cfg := s.configSnapshot()
-	return s.profileResponses(ctx, cfg, req)
+	currentSettings := s.settingsSnapshot()
+	return s.profileResponses(ctx, currentSettings, req)
 }
 
 func (s *Service) Serve(ctx context.Context, conn *websocket.Conn, target *mmodem.Modem) error {
@@ -207,9 +207,9 @@ func (s *Service) Serve(ctx context.Context, conn *websocket.Conn, target *mmode
 	return nil
 }
 
-func (s *Service) configSnapshot() *config.Config {
-	cfg := s.store.Snapshot()
-	return &cfg
+func (s *Service) settingsSnapshot() *settings.Settings {
+	currentSettings := s.store.Snapshot()
+	return &currentSettings
 }
 
 func (s *Service) run(ctx context.Context, session *session, target *mmodem.Modem, start Start) error {
@@ -279,8 +279,8 @@ func validateTarget(target *mmodem.Modem, start Start) error {
 }
 
 func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start) (*activeSession, error) {
-	cfg := s.configSnapshot()
-	candidates, err := s.profileCandidates(ctx, cfg, ProfilesRequest{
+	currentSettings := s.settingsSnapshot()
+	candidates, err := s.profileCandidates(ctx, currentSettings, ProfilesRequest{
 		SourceType: start.SourceType,
 		SourceID:   start.SourceID,
 		SourceIMEI: start.SourceIMEI,
@@ -292,11 +292,11 @@ func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start
 	if !ok || !candidate.response.Supported {
 		return nil, ErrProfileUnsupported
 	}
-	if err := s.activateSourceProfile(ctx, cfg, start, candidate); err != nil {
+	if err := s.activateSourceProfile(ctx, currentSettings, start, candidate); err != nil {
 		return nil, err
 	}
 
-	source, err := s.openSource(ctx, cfg, start)
+	source, err := s.openSource(ctx, currentSettings, start)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +309,7 @@ func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start
 		}
 	}()
 
-	targetClient, err := ilpa.New(target, cfg)
+	targetClient, err := ilpa.New(target, currentSettings)
 	if err != nil {
 		return nil, fmt.Errorf("create target LPA client: %w", err)
 	}
@@ -347,7 +347,7 @@ func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start
 	releaseSource = false
 	releaseTarget = false
 	return &activeSession{
-		cfg:          cfg,
+		settings:     currentSettings,
 		source:       source,
 		target:       target,
 		targetClient: targetClient,
@@ -412,12 +412,12 @@ func (s *Service) handleEvent(ctx context.Context, session *session, active *act
 
 func (s *Service) handleSMDSDiscovery(ctx context.Context, session *session, active *activeSession, result *ts43.Result, event ts43.SMDSDiscoveryEvent) (*ts43.Result, error) {
 	slog.Info("TS.43 transfer requires SM-DS discovery", "targetEID", event.TargetEID, "subscriptionResult", event.SubscriptionResult)
-	cfg, err := smdsDownloadConfig(ctx, active.targetClient, event)
+	downloadConfig, err := smdsDownloadConfig(ctx, active.targetClient, event)
 	if err != nil {
 		slog.Warn("resolve TS.43 SM-DS download config", "error", err)
 		return result, err
 	}
-	next, err := s.downloadEnableAndComplete(ctx, session, active, result, cfg)
+	next, err := s.downloadEnableAndComplete(ctx, session, active, result, downloadConfig)
 	if err != nil {
 		slog.Warn("download TS.43 SM-DS transferred profile", "error", err)
 	}
@@ -430,7 +430,7 @@ func (s *Service) handleSourceProfileDeletion(ctx context.Context, session *sess
 	}
 	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stageDeleting})
 	active.source.Close()
-	if err := s.deleteSourceProfile(ctx, active.cfg, start, event.ICCID); err != nil {
+	if err := s.deleteSourceProfile(ctx, active.settings, start, event.ICCID); err != nil {
 		return result, err
 	}
 	return active.client.Continue(ctx, result, ts43.ContinueRequest{SourceProfileDeleted: true})

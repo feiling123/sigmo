@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 const defaultEndpoint = "https://api.day.app"
@@ -32,8 +32,8 @@ type payload struct {
 	DeviceKey string `json:"device_key"`
 }
 
-func New(cfg *config.Channel) (*Sender, error) {
-	endpoint := strings.TrimSpace(cfg.Endpoint)
+func New(channel *settings.Channel) (*Sender, error) {
+	endpoint := strings.TrimSpace(channel.Endpoint)
 	if endpoint == "" {
 		endpoint = defaultEndpoint
 	}
@@ -42,7 +42,7 @@ func New(cfg *config.Channel) (*Sender, error) {
 		return nil, fmt.Errorf("parsing bark endpoint: %w", err)
 	}
 	appendPathSegment(parsed, "push")
-	deviceKeys := cfg.Recipients.Strings()
+	deviceKeys := channel.Recipients.Strings()
 	if len(deviceKeys) == 0 {
 		return nil, errors.New("bark recipients are required")
 	}

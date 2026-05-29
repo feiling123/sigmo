@@ -8,6 +8,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 type Handler struct {
@@ -32,11 +33,15 @@ const (
 	errorCodeAnyBandExclusive      = "any_band_exclusive"
 )
 
-func New(registry *mmodem.Registry, preferences *mmodem.NetworkPreferences) *Handler {
+func New(registry *mmodem.Registry, preferences *mmodem.NetworkPreferences, store *storage.Store) (*Handler, error) {
+	networks, err := newNetwork(preferences, store)
+	if err != nil {
+		return nil, err
+	}
 	return &Handler{
 		registry: registry,
-		networks: newNetwork(preferences),
-	}
+		networks: networks,
+	}, nil
 }
 
 func (h *Handler) List(c *echo.Context) error {

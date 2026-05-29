@@ -9,8 +9,8 @@ import (
 	"github.com/damonto/euicc-go/bertlv"
 	sgp22 "github.com/damonto/euicc-go/v2"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 func TestActiveProfile(t *testing.T) {
@@ -147,9 +147,9 @@ func TestEnableSessionEnable(t *testing.T) {
 				waitForModemCalled bool
 			)
 			l := &lifecycle{
-				cfg:          &config.Config{},
+				settings:     &settings.Settings{},
 				readyTimeout: time.Millisecond,
-				newClient: func(*mmodem.Modem, *config.Config) (lifecycleClient, error) {
+				newClient: func(*mmodem.Modem, *settings.Settings) (lifecycleClient, error) {
 					if len(factoryClients) == 0 {
 						return &fakeLifecycleClient{profiles: disabledProfiles(iccid)}, nil
 					}

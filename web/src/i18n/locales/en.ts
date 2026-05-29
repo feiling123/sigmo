@@ -23,13 +23,12 @@ const en = {
     error: 'Failed to load modems. Please check your connection.',
     retry: 'Retry',
     refresh: 'Refresh',
-    config: 'Config',
+    settings: 'Settings',
   },
-  config: {
-    title: 'Configuration',
+  settings: {
+    title: 'Settings',
     back: 'Back',
-    loading: 'Loading configuration',
-    restartHint: 'Listen address changes take effect after restarting the service.',
+    loading: 'Loading settings',
     appTitle: 'App',
     appDescription: 'Startup, security, and runtime mode.',
     authTitle: 'Auth',
@@ -43,23 +42,9 @@ const en = {
     removeHeader: 'Remove',
     cancel: 'Cancel',
     save: 'Save',
-    saveSuccess: 'Configuration saved.',
-    restartRequired: 'Configuration saved. Listen address changes require restart.',
+    saveSuccess: 'Settings saved.',
     schema: {
       app: {
-        environment: {
-          label: 'Environment',
-          description: 'Runtime mode.',
-          options: {
-            production: 'Production',
-            development: 'Development',
-          },
-        },
-        listenAddress: {
-          label: 'Listen address',
-          description: 'HTTP bind address. Changes require restart.',
-          placeholder: '0.0.0.0:9527',
-        },
         otpRequired: {
           label: 'OTP required',
           description: 'Require one-time password verification before using the API.',

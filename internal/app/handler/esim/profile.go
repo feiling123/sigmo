@@ -7,24 +7,24 @@ import (
 	"unicode/utf8"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type profile struct {
-	store *config.Store
+	store *settings.Store
 }
 
 var errInvalidNickname = errors.New("nickname must be valid utf-8 and 64 bytes or fewer")
 
-func newProfile(store *config.Store) *profile {
+func newProfile(store *settings.Store) *profile {
 	return &profile{store: store}
 }
 
 func (p *profile) List(modem *mmodem.Modem) ([]ProfileResponse, error) {
-	cfg := p.store.Snapshot()
-	client, err := lpa.New(modem, &cfg)
+	current := p.store.Snapshot()
+	client, err := lpa.New(modem, &current)
 	if err != nil {
 		return nil, fmt.Errorf("create LPA client: %w", err)
 	}
@@ -57,8 +57,8 @@ func (p *profile) UpdateNickname(modem *mmodem.Modem, iccid sgp22.ICCID, nicknam
 	if err := validateNickname(nickname); err != nil {
 		return err
 	}
-	cfg := p.store.Snapshot()
-	client, err := lpa.New(modem, &cfg)
+	current := p.store.Snapshot()
+	client, err := lpa.New(modem, &current)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

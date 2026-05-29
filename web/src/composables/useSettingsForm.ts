@@ -1,25 +1,25 @@
 import { computed, ref, type Ref } from 'vue'
 
 import type {
-  ConfigChannel,
-  ConfigChannelSchema,
-  ConfigResponse,
-  ConfigValues,
-} from '@/types/config'
+  SettingsChannel,
+  SettingsChannelSchema,
+  SettingsResponse,
+  SettingsValues,
+} from '@/types/settings'
 
-export type ConfigRootSection = 'app' | 'proxy'
-export type ConfigSectionKey = ConfigRootSection | 'channels'
+export type SettingsRootSection = 'app' | 'proxy'
+export type SettingsSectionKey = SettingsRootSection | 'channels'
 
 const authFieldKeys = new Set(['otpRequired', 'authProviders'])
 
-export const useConfigForm = (
-  config: Ref<ConfigResponse | null>,
-  values: Ref<ConfigValues | null>,
+export const useSettingsForm = (
+  settings: Ref<SettingsResponse | null>,
+  values: Ref<SettingsValues | null>,
 ) => {
-  const activeSection = ref<ConfigSectionKey>('app')
+  const activeSection = ref<SettingsSectionKey>('app')
   const expandedChannels = ref<Record<string, boolean>>({})
 
-  const schema = computed(() => config.value?.schema)
+  const schema = computed(() => settings.value?.schema)
   const appFields = computed(() =>
     (schema.value?.app ?? []).filter((field) => !authFieldKeys.has(field.key)),
   )
@@ -32,17 +32,16 @@ export const useConfigForm = (
     channelSchemas.value.filter((channel) => isChannelEnabled(channel.key)),
   )
   const isReady = computed(() => values.value !== null && schema.value !== undefined)
-  const configPath = computed(() => config.value?.path ?? '')
   const appValues = computed(() => values.value?.app ?? null)
   const proxyValues = computed(() => values.value?.proxy ?? null)
   const channels = computed(() => values.value?.channels ?? {})
 
-  const rootRecord = (section: ConfigRootSection) => {
+  const rootRecord = (section: SettingsRootSection) => {
     if (!values.value) return null
     return values.value[section] as unknown as Record<string, unknown>
   }
 
-  const setRootValue = (section: ConfigRootSection, key: string, value: unknown) => {
+  const setRootValue = (section: SettingsRootSection, key: string, value: unknown) => {
     const record = rootRecord(section)
     if (!record) return
     record[key] = value
@@ -58,7 +57,7 @@ export const useConfigForm = (
     return values.value?.channels[channel]?.enabled === true
   }
 
-  const toggleChannel = (schema: ConfigChannelSchema, enabled: boolean) => {
+  const toggleChannel = (schema: SettingsChannelSchema, enabled: boolean) => {
     if (!values.value) return
     const channel = values.value.channels[schema.key] ?? defaultChannel(schema, enabled)
     channel.enabled = enabled
@@ -69,7 +68,7 @@ export const useConfigForm = (
     expandedChannels.value = { ...expandedChannels.value, [schema.key]: enabled }
   }
 
-  const defaultChannel = (schema: ConfigChannelSchema, enabled = true): ConfigChannel => {
+  const defaultChannel = (schema: SettingsChannelSchema, enabled = true): SettingsChannel => {
     const channel: Record<string, unknown> = { enabled }
     for (const field of schema.fields) {
       if (field.control === 'switch') channel[field.key] = false
@@ -78,7 +77,7 @@ export const useConfigForm = (
       if (field.control === 'keyValue') channel[field.key] = {}
       if (field.control === 'select') channel[field.key] = field.options?.[0]?.value ?? ''
     }
-    return channel as ConfigChannel
+    return channel as SettingsChannel
   }
 
   const removeAuthProvider = (channel: string) => {
@@ -117,7 +116,6 @@ export const useConfigForm = (
     authFields,
     channels,
     channelSchemas,
-    configPath,
     enabledChannelSchemas,
     expandedChannels,
     initializeExpandedChannels,

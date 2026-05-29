@@ -1,17 +1,17 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import ConfigKeyValueField from '@/components/config/ConfigKeyValueField.vue'
-import ConfigView from '@/views/ConfigView.vue'
-import type { ConfigResponse, ConfigValues } from '@/types/config'
+import SettingsKeyValueField from '@/components/settings/SettingsKeyValueField.vue'
+import SettingsView from '@/views/SettingsView.vue'
+import type { SettingsResponse, SettingsValues } from '@/types/settings'
 
 const api = vi.hoisted(() => ({
-  getConfig: vi.fn(),
-  updateConfig: vi.fn(),
+  getSettings: vi.fn(),
+  updateSettings: vi.fn(),
 }))
 
-vi.mock('@/apis/config', () => ({
-  useConfigApi: () => api,
+vi.mock('@/apis/settings', () => ({
+  useSettingsApi: () => api,
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -58,10 +58,8 @@ const stubDesktopViewport = () => {
   )
 }
 
-const values = (): ConfigValues => ({
+const values = (): SettingsValues => ({
   app: {
-    environment: 'production',
-    listenAddress: '0.0.0.0:9527',
     authProviders: [],
     otpRequired: false,
   },
@@ -83,24 +81,9 @@ const values = (): ConfigValues => ({
   },
 })
 
-const response = (): ConfigResponse => ({
-  path: '/tmp/sigmo/config.toml',
+const response = (): SettingsResponse => ({
   schema: {
     app: [
-      {
-        key: 'environment',
-        label: 'Environment',
-        control: 'select',
-        options: [
-          { label: 'Production', value: 'production' },
-          { label: 'Development', value: 'development' },
-        ],
-      },
-      {
-        key: 'listenAddress',
-        label: 'Listen address',
-        control: 'text',
-      },
       {
         key: 'otpRequired',
         label: 'OTP required',
@@ -218,18 +201,18 @@ const stubs = {
   },
 }
 
-const mountView = async (config = response(), attachTo?: HTMLElement) => {
-  api.getConfig.mockResolvedValue({ data: { value: clone(config) } })
-  api.updateConfig.mockImplementation(async (payload: ConfigValues) => ({
+const mountView = async (settings = response(), attachTo?: HTMLElement) => {
+  api.getSettings.mockResolvedValue({ data: { value: clone(settings) } })
+  api.updateSettings.mockImplementation(async (payload: SettingsValues) => ({
     data: {
       value: {
-        ...config,
+        ...settings,
         values: clone(payload),
       },
     },
   }))
 
-  const wrapper = mount(ConfigView, {
+  const wrapper = mount(SettingsView, {
     attachTo,
     global: {
       stubs,
@@ -239,7 +222,7 @@ const mountView = async (config = response(), attachTo?: HTMLElement) => {
   return wrapper
 }
 
-describe('ConfigView', () => {
+describe('SettingsView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -253,14 +236,9 @@ describe('ConfigView', () => {
   it('renders fields from schema and auth providers as checkboxes', async () => {
     const wrapper = await mountView()
 
-    expect(wrapper.text()).toContain('/tmp/sigmo/config.toml')
-    const environment = wrapper.find('#config-app-environment[data-slot="select-trigger"]')
-    expect(environment.exists()).toBe(true)
-    expect(environment.attributes('role')).toBe('combobox')
-    expect(wrapper.find('input#config-app-listenAddress').exists()).toBe(true)
-    expect(wrapper.find('button#config-app-otpRequired[role="switch"]').exists()).toBe(true)
-    expect(wrapper.find('#config-channel-telegram-recipients[role="listbox"]').exists()).toBe(true)
-    expect(wrapper.find('#config-channel-email-tlsPolicy[data-slot="select-trigger"]').exists()).toBe(
+    expect(wrapper.find('button#settings-app-otpRequired[role="switch"]').exists()).toBe(true)
+    expect(wrapper.find('#settings-channel-telegram-recipients[role="listbox"]').exists()).toBe(true)
+    expect(wrapper.find('#settings-channel-email-tlsPolicy[data-slot="select-trigger"]').exists()).toBe(
       false,
     )
     expect(wrapper.find('select').exists()).toBe(false)
@@ -273,58 +251,54 @@ describe('ConfigView', () => {
   })
 
   it('renders localized schema text when i18n keys are present', async () => {
-    const config = response()
-    const environmentField = config.schema.app[0]
-    const telegramChannel = config.schema.channels[0]
-    if (!environmentField || !telegramChannel) {
+    const settings = response()
+    const otpField = settings.schema.app[0]
+    const telegramChannel = settings.schema.channels[0]
+    if (!otpField || !telegramChannel) {
       throw new Error('test fixture missing schema entries')
     }
-    config.schema.app[0] = {
-      ...environmentField,
-      label: 'config.schema.app.environment.label',
-      description: 'config.schema.app.environment.description',
-      options: environmentField.options?.map((option) => ({
-        ...option,
-        label: `config.schema.app.environment.options.${option.value}`,
-      })),
+    settings.schema.app[0] = {
+      ...otpField,
+      label: 'settings.schema.app.otpRequired.label',
+      description: 'settings.schema.app.otpRequired.description',
     }
-    config.schema.channels[0] = {
+    settings.schema.channels[0] = {
       ...telegramChannel,
-      label: 'config.schema.channels.telegram.label',
-      description: 'config.schema.channels.telegram.description',
+      label: 'settings.schema.channels.telegram.label',
+      description: 'settings.schema.channels.telegram.description',
       fields: telegramChannel.fields.map((field) =>
         field.key === 'headers'
           ? {
               ...field,
-              label: 'config.schema.channels.http.headers.label',
-              description: 'config.schema.channels.http.headers.description',
+              label: 'settings.schema.channels.http.headers.label',
+              description: 'settings.schema.channels.http.headers.description',
             }
           : field,
       ),
     }
 
-    const wrapper = await mountView(config)
+    const wrapper = await mountView(settings)
 
-    expect(wrapper.text()).toContain('config.schema.app.environment.label')
-    expect(wrapper.text()).toContain('config.schema.app.environment.description')
-    expect(wrapper.text()).toContain('config.schema.channels.telegram.label')
-    expect(wrapper.text()).toContain('config.schema.channels.telegram.description')
-    expect(wrapper.text()).toContain('config.schema.channels.http.headers.label')
-    expect(wrapper.text()).toContain('config.schema.channels.http.headers.description')
+    expect(wrapper.text()).toContain('settings.schema.app.otpRequired.label')
+    expect(wrapper.text()).toContain('settings.schema.app.otpRequired.description')
+    expect(wrapper.text()).toContain('settings.schema.channels.telegram.label')
+    expect(wrapper.text()).toContain('settings.schema.channels.telegram.description')
+    expect(wrapper.text()).toContain('settings.schema.channels.http.headers.label')
+    expect(wrapper.text()).toContain('settings.schema.channels.http.headers.description')
   })
 
   it('renders multi-option select fields with shadcn select', async () => {
-    const config = response()
-    config.values.channels = {
+    const settings = response()
+    settings.values.channels = {
       email: {
         enabled: true,
         tlsPolicy: 'opportunistic',
       },
     }
 
-    const wrapper = await mountView(config)
+    const wrapper = await mountView(settings)
 
-    const trigger = wrapper.find('#config-channel-email-tlsPolicy[data-slot="select-trigger"]')
+    const trigger = wrapper.find('#settings-channel-email-tlsPolicy[data-slot="select-trigger"]')
     expect(trigger.exists()).toBe(true)
     expect(trigger.attributes('role')).toBe('combobox')
     expect(wrapper.find('select').exists()).toBe(false)
@@ -337,15 +311,15 @@ describe('ConfigView', () => {
     const wrapper = await mountView(response(), root)
 
     vi.spyOn(
-      wrapper.find('#config-section-app').element,
+      wrapper.find('#settings-section-app').element,
       'getBoundingClientRect',
     ).mockReturnValue(sectionRect(-360))
     vi.spyOn(
-      wrapper.find('#config-section-proxy').element,
+      wrapper.find('#settings-section-proxy').element,
       'getBoundingClientRect',
     ).mockReturnValue(sectionRect(80))
     vi.spyOn(
-      wrapper.find('#config-section-channels').element,
+      wrapper.find('#settings-section-channels').element,
       'getBoundingClientRect',
     ).mockReturnValue(sectionRect(720))
 
@@ -379,26 +353,26 @@ describe('ConfigView', () => {
     root.remove()
   })
 
-  it('does not register scroll listeners after unmounting during config load', async () => {
+  it('does not register scroll listeners after unmounting during settings load', async () => {
     stubDesktopViewport()
     const addEventListener = vi.spyOn(window, 'addEventListener')
-    let resolveConfig: (value: { data: { value: ConfigResponse } }) => void = () => {}
-    api.getConfig.mockReturnValue(
+    let resolveSettings: (value: { data: { value: SettingsResponse } }) => void = () => {}
+    api.getSettings.mockReturnValue(
       new Promise((resolve) => {
-        resolveConfig = resolve
+        resolveSettings = resolve
       }),
     )
 
-    const wrapper = mount(ConfigView, {
+    const wrapper = mount(SettingsView, {
       global: {
         stubs,
       },
     })
     await wrapper.vm.$nextTick()
-    expect(api.getConfig).toHaveBeenCalledTimes(1)
+    expect(api.getSettings).toHaveBeenCalledTimes(1)
 
     wrapper.unmount()
-    resolveConfig({ data: { value: response() } })
+    resolveSettings({ data: { value: response() } })
     await flushPromises()
 
     expect(addEventListener).not.toHaveBeenCalledWith(
@@ -414,40 +388,40 @@ describe('ConfigView', () => {
     await wrapper.find('[role="checkbox"]').trigger('click')
     const saveButton = wrapper
       .findAll('button')
-      .find((button) => button.text().includes('config.save'))
+      .find((button) => button.text().includes('settings.save'))
     expect(saveButton).toBeDefined()
     await saveButton?.trigger('click')
     await flushPromises()
 
-    expect(api.updateConfig).toHaveBeenCalledTimes(1)
-    const payload = api.updateConfig.mock.calls[0]?.[0] as ConfigValues
+    expect(api.updateSettings).toHaveBeenCalledTimes(1)
+    const payload = api.updateSettings.mock.calls[0]?.[0] as SettingsValues
     expect(payload.app.authProviders).toEqual(['telegram'])
   })
 
   it('saves updated tag lists as arrays', async () => {
     const wrapper = await mountView()
 
-    await wrapper.find('#config-channel-telegram-recipients .tags-input-add').trigger('click')
+    await wrapper.find('#settings-channel-telegram-recipients .tags-input-add').trigger('click')
     const saveButton = wrapper
       .findAll('button')
-      .find((button) => button.text().includes('config.save'))
+      .find((button) => button.text().includes('settings.save'))
     expect(saveButton).toBeDefined()
     await saveButton?.trigger('click')
     await flushPromises()
 
-    expect(api.updateConfig).toHaveBeenCalledTimes(1)
-    const payload = api.updateConfig.mock.calls[0]?.[0] as ConfigValues
+    expect(api.updateSettings).toHaveBeenCalledTimes(1)
+    const payload = api.updateSettings.mock.calls[0]?.[0] as SettingsValues
     expect(payload.channels.telegram?.recipients).toEqual(['10001', '10002'])
   })
 
   it('saves added, renamed, and removed key/value channel fields', async () => {
     const wrapper = await mountView()
-    const keyValueField = wrapper.findComponent(ConfigKeyValueField)
+    const keyValueField = wrapper.findComponent(SettingsKeyValueField)
     expect(keyValueField.exists()).toBe(true)
 
     const addHeaderButton = keyValueField
       .findAll('button')
-      .find((button) => button.text().includes('config.addHeader'))
+      .find((button) => button.text().includes('settings.addHeader'))
     expect(addHeaderButton).toBeDefined()
     await addHeaderButton?.trigger('click')
 
@@ -464,13 +438,13 @@ describe('ConfigView', () => {
 
     const saveButton = wrapper
       .findAll('button')
-      .find((button) => button.text().includes('config.save'))
+      .find((button) => button.text().includes('settings.save'))
     expect(saveButton).toBeDefined()
     await saveButton?.trigger('click')
     await flushPromises()
 
-    expect(api.updateConfig).toHaveBeenCalledTimes(1)
-    const payload = api.updateConfig.mock.calls[0]?.[0] as ConfigValues
+    expect(api.updateSettings).toHaveBeenCalledTimes(1)
+    const payload = api.updateSettings.mock.calls[0]?.[0] as SettingsValues
     expect(payload.channels.telegram?.headers).toEqual({
       'X-Sigmo': 'enabled',
     })
@@ -479,16 +453,16 @@ describe('ConfigView', () => {
   it('keeps channel settings when a channel is disabled', async () => {
     const wrapper = await mountView()
 
-    await wrapper.find('#config-channel-telegram-enabled').trigger('click')
+    await wrapper.find('#settings-channel-telegram-enabled').trigger('click')
     const saveButton = wrapper
       .findAll('button')
-      .find((button) => button.text().includes('config.save'))
+      .find((button) => button.text().includes('settings.save'))
     expect(saveButton).toBeDefined()
     await saveButton?.trigger('click')
     await flushPromises()
 
-    expect(api.updateConfig).toHaveBeenCalledTimes(1)
-    const payload = api.updateConfig.mock.calls[0]?.[0] as ConfigValues
+    expect(api.updateSettings).toHaveBeenCalledTimes(1)
+    const payload = api.updateSettings.mock.calls[0]?.[0] as SettingsValues
     expect(payload.channels.telegram).toMatchObject({
       enabled: false,
       botToken: 'secret',
@@ -500,26 +474,26 @@ describe('ConfigView', () => {
   })
 
   it('does not render unsupported controls as editable inputs', async () => {
-    const config = response()
-    config.schema.app.push({
+    const settings = response()
+    settings.schema.app.push({
       key: 'mystery',
       label: 'Mystery',
       control: 'unsupported' as never,
     })
 
-    const wrapper = await mountView(config)
+    const wrapper = await mountView(settings)
 
     expect(wrapper.text()).toContain('Unsupported control: unsupported')
-    expect(wrapper.find('input#config-app-mystery').exists()).toBe(false)
+    expect(wrapper.find('input#settings-app-mystery').exists()).toBe(false)
   })
 
   it('shows unsupported auth controls instead of dropping them', async () => {
-    const config = response()
-    config.schema.app = config.schema.app.map((field) =>
+    const settings = response()
+    settings.schema.app = settings.schema.app.map((field) =>
       field.key === 'authProviders' ? { ...field, control: 'unsupported' as never } : field,
     )
 
-    const wrapper = await mountView(config)
+    const wrapper = await mountView(settings)
 
     expect(wrapper.text()).toContain('Unsupported control: unsupported')
   })

@@ -1,10 +1,8 @@
-package config
+package settings
 
 type Response struct {
-	Path                  string   `json:"path"`
-	Schema                Schema   `json:"schema"`
-	Values                Values   `json:"values"`
-	RestartRequiredFields []string `json:"restartRequiredFields,omitempty"`
+	Schema Schema `json:"schema"`
+	Values Values `json:"values"`
 }
 
 type Values struct {
@@ -14,8 +12,6 @@ type Values struct {
 }
 
 type AppValues struct {
-	Environment   string   `json:"environment" validate:"required,oneof=production development"`
-	ListenAddress string   `json:"listenAddress" validate:"required"`
 	AuthProviders []string `json:"authProviders" validate:"omitempty,dive,required"`
 	OTPRequired   bool     `json:"otpRequired"`
 }

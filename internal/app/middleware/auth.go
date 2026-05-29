@@ -8,15 +8,15 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/app/httpapi"
-	"github.com/damonto/sigmo/internal/pkg/config"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 const bearerPrefix = "Bearer "
 
-func Auth(store *auth.Store, configStore *config.Store) echo.MiddlewareFunc {
+func Auth(store *auth.Store, settingsStore *settings.Store) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			if !configStore.OTPRequired() {
+			if !settingsStore.OTPRequired() {
 				return next(c)
 			}
 			header := c.Request().Header.Get("Authorization")

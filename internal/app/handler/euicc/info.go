@@ -5,24 +5,24 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type euicc struct {
-	store *config.Store
+	store *settings.Store
 }
 
-func newEUICC(store *config.Store) *euicc {
+func newEUICC(store *settings.Store) *euicc {
 	return &euicc{
 		store: store,
 	}
 }
 
 func (e *euicc) Get(modem *mmodem.Modem) (*EuiccResponse, error) {
-	cfg := e.store.Snapshot()
-	client, err := lpa.New(modem, &cfg)
+	current := e.store.Snapshot()
+	client, err := lpa.New(modem, &current)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return nil, err

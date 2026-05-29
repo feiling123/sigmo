@@ -21,6 +21,10 @@ func newPresenceTask(registry *Registry, start func(context.Context, *Modem)) *p
 	}
 }
 
+func RunPresenceTask(ctx context.Context, registry *Registry, start func(context.Context, *Modem)) error {
+	return newPresenceTask(registry, start).Run(ctx)
+}
+
 func (t *presenceTask) Run(ctx context.Context) error {
 	if t.registry == nil {
 		return errors.New("modem registry is required")

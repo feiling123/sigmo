@@ -2,28 +2,28 @@
 import { ChevronDown } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
-import ConfigField from '@/components/config/ConfigField.vue'
-import ConfigKeyValueField from '@/components/config/ConfigKeyValueField.vue'
+import SettingsField from '@/components/settings/SettingsField.vue'
+import SettingsKeyValueField from '@/components/settings/SettingsKeyValueField.vue'
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { Switch } from '@/components/ui/switch'
-import type { ConfigChannel, ConfigChannelSchema } from '@/types/config'
+import type { SettingsChannel, SettingsChannelSchema } from '@/types/settings'
 
 const props = defineProps<{
   id: string
   title: string
   description: string
-  channels: Record<string, ConfigChannel>
+  channels: Record<string, SettingsChannel>
   disabled?: boolean
   expandedChannels: Record<string, boolean>
-  schemas: ConfigChannelSchema[]
+  schemas: SettingsChannelSchema[]
 }>()
 
 const emit = defineEmits<{
-  'toggle-channel': [schema: ConfigChannelSchema, enabled: boolean]
+  'toggle-channel': [schema: SettingsChannelSchema, enabled: boolean]
   'toggle-details': [channel: string]
   'update-field': [channel: string, key: string, value: unknown]
 }>()
@@ -35,11 +35,11 @@ const schemaText = (value: string | undefined) => {
 }
 
 const fieldID = (key: string, channel: string) => {
-  return `config-channel-${channel}-${key}`
+  return `settings-channel-${channel}-${key}`
 }
 
 const channelValue = (channel: string, key: string) => {
-  return props.channels[channel]?.[key as keyof ConfigChannel]
+  return props.channels[channel]?.[key as keyof SettingsChannel]
 }
 
 const isChannelEnabled = (channel: string) => {
@@ -121,14 +121,14 @@ const isWideField = (control: string) => {
             class="space-y-2"
             :class="{ 'sm:col-span-2': isWideField(field.control) }"
           >
-            <ConfigKeyValueField
+            <SettingsKeyValueField
               v-if="field.control === 'keyValue'"
               :field="field"
               :model-value="channelValue(channel.key, field.key)"
               :disabled="disabled"
               @update:model-value="emit('update-field', channel.key, field.key, $event)"
             />
-            <ConfigField
+            <SettingsField
               v-else
               :id="fieldID(field.key, channel.key)"
               :field="field"

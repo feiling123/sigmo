@@ -14,8 +14,8 @@ import (
 	"github.com/gorilla/websocket"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/websheet"
 	"github.com/damonto/ts43-go/sim"
 	"github.com/damonto/ts43-go/ts43"
@@ -161,14 +161,14 @@ func TestModemName(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		cfg   config.Config
-		modem *mmodem.Modem
-		want  string
+		name            string
+		currentSettings settings.Settings
+		modem           *mmodem.Modem
+		want            string
 	}{
 		{
 			name: "configured alias wins",
-			cfg: config.Config{Modems: map[string]config.Modem{
+			currentSettings: settings.Settings{Modems: map[string]settings.Modem{
 				"imei-1": {Alias: "Office"},
 			}},
 			modem: &mmodem.Modem{
@@ -178,8 +178,8 @@ func TestModemName(t *testing.T) {
 			want: "Office",
 		},
 		{
-			name: "model fallback matches modem overview",
-			cfg:  config.Config{},
+			name:            "model fallback matches modem overview",
+			currentSettings: settings.Settings{},
 			modem: &mmodem.Modem{
 				EquipmentIdentifier: "imei-2",
 				Manufacturer:        "Quectel",
@@ -188,8 +188,8 @@ func TestModemName(t *testing.T) {
 			want: "RM520N-GL",
 		},
 		{
-			name: "empty model stays empty",
-			cfg:  config.Config{},
+			name:            "empty model stays empty",
+			currentSettings: settings.Settings{},
 			modem: &mmodem.Modem{
 				EquipmentIdentifier: "imei-3",
 				Manufacturer:        "Quectel",
@@ -200,7 +200,7 @@ func TestModemName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := modemName(&tt.cfg, tt.modem); got != tt.want {
+			if got := modemName(&tt.currentSettings, tt.modem); got != tt.want {
 				t.Fatalf("modemName() = %q, want %q", got, tt.want)
 			}
 		})

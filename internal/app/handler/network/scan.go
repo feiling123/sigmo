@@ -2,17 +2,28 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 type network struct {
 	preferences *mmodem.NetworkPreferences
+	store       *storage.Store
 }
 
-func newNetwork(preferences *mmodem.NetworkPreferences) *network {
-	return &network{preferences: preferences}
+var errNetworkPreferencesRequired = errors.New("network preferences are required")
+
+func newNetwork(preferences *mmodem.NetworkPreferences, store *storage.Store) (*network, error) {
+	if preferences == nil {
+		return nil, errNetworkPreferencesRequired
+	}
+	if store == nil {
+		return nil, errNetworkRegistrationStorageRequired
+	}
+	return &network{preferences: preferences, store: store}, nil
 }
 
 func (n *network) List(ctx context.Context, modem *mmodem.Modem) ([]NetworkResponse, error) {

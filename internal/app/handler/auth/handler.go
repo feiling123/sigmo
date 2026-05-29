@@ -8,7 +8,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/app/httpapi"
-	"github.com/damonto/sigmo/internal/pkg/config"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type Handler struct {
@@ -25,9 +25,9 @@ const (
 	errorCodeVerifyOTPFailed         = "verify_otp_failed"
 )
 
-func New(configStore *config.Store, store *auth.Store) *Handler {
+func New(settingsStore *settings.Store, store *auth.Store) *Handler {
 	return &Handler{
-		otp: newOTP(configStore, store),
+		otp: newOTP(settingsStore, store),
 	}
 }
 

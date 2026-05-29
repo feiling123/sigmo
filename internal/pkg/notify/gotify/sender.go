@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type Sender struct {
@@ -23,8 +23,8 @@ type Sender struct {
 	priority int
 }
 
-func New(cfg *config.Channel) (*Sender, error) {
-	endpoint := strings.TrimSpace(cfg.Endpoint)
+func New(channel *settings.Channel) (*Sender, error) {
+	endpoint := strings.TrimSpace(channel.Endpoint)
 	if endpoint == "" {
 		return nil, errors.New("gotify endpoint is required")
 	}
@@ -36,7 +36,7 @@ func New(cfg *config.Channel) (*Sender, error) {
 	query := parsed.Query()
 	query.Del("token")
 	parsed.RawQuery = query.Encode()
-	tokens := cfg.Recipients.Strings()
+	tokens := channel.Recipients.Strings()
 	if len(tokens) == 0 {
 		return nil, errors.New("gotify recipients are required")
 	}
@@ -44,7 +44,7 @@ func New(cfg *config.Channel) (*Sender, error) {
 		client:   &http.Client{Timeout: 10 * time.Second},
 		baseURL:  *parsed,
 		tokens:   tokens,
-		priority: cfg.Priority,
+		priority: channel.Priority,
 	}, nil
 }
 

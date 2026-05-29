@@ -23,13 +23,12 @@ const zh = {
     error: '加载 Modem 失败，请检查网络连接。',
     retry: '重试',
     refresh: '刷新',
-    config: '配置',
+    settings: '配置',
   },
-  config: {
+  settings: {
     title: '配置',
     back: '返回首页',
-    loading: '加载配置',
-    restartHint: '监听地址保存后需要重启服务才会生效。',
+    loading: '加载设置',
     appTitle: '应用',
     appDescription: '启动、安全和运行模式。',
     authTitle: '认证',
@@ -43,23 +42,9 @@ const zh = {
     removeHeader: '删除',
     cancel: '取消',
     save: '保存',
-    saveSuccess: '配置已保存。',
-    restartRequired: '配置已保存，监听地址需要重启后生效。',
+    saveSuccess: '设置已保存。',
     schema: {
       app: {
-        environment: {
-          label: '运行环境',
-          description: '服务运行模式。',
-          options: {
-            production: '生产环境',
-            development: '开发环境',
-          },
-        },
-        listenAddress: {
-          label: '监听地址',
-          description: 'HTTP 绑定地址，保存后需要重启服务。',
-          placeholder: '0.0.0.0:9527',
-        },
         otpRequired: {
           label: '启用 OTP',
           description: '使用 API 前要求一次性验证码验证。',

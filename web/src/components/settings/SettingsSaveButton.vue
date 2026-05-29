@@ -21,11 +21,11 @@ const { t } = useI18n()
   <Button type="button" :disabled="disabled" @click="emit('save')">
     <span v-if="saving" class="inline-flex items-center gap-2">
       <Spinner class="size-4" />
-      {{ t('config.save') }}
+      {{ t('settings.save') }}
     </span>
     <span v-else class="inline-flex items-center gap-2">
       <Save class="size-4" />
-      {{ t('config.save') }}
+      {{ t('settings.save') }}
     </span>
   </Button>
 </template>

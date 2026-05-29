@@ -6,22 +6,22 @@ import (
 	"strconv"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type notification struct {
-	store *config.Store
+	store *settings.Store
 }
 
-func newNotification(store *config.Store) *notification {
+func newNotification(store *settings.Store) *notification {
 	return &notification{store: store}
 }
 
 func (n *notification) List(modem *mmodem.Modem) ([]NotificationResponse, error) {
-	cfg := n.store.Snapshot()
-	client, err := lpa.New(modem, &cfg)
+	current := n.store.Snapshot()
+	client, err := lpa.New(modem, &current)
 	if err != nil {
 		return nil, fmt.Errorf("create LPA client: %w", err)
 	}
@@ -47,8 +47,8 @@ func (n *notification) List(modem *mmodem.Modem) ([]NotificationResponse, error)
 }
 
 func (n *notification) Resend(modem *mmodem.Modem, sequence sgp22.SequenceNumber) error {
-	cfg := n.store.Snapshot()
-	client, err := lpa.New(modem, &cfg)
+	current := n.store.Snapshot()
+	client, err := lpa.New(modem, &current)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}
@@ -64,8 +64,8 @@ func (n *notification) Resend(modem *mmodem.Modem, sequence sgp22.SequenceNumber
 }
 
 func (n *notification) Delete(modem *mmodem.Modem, sequence sgp22.SequenceNumber) error {
-	cfg := n.store.Snapshot()
-	client, err := lpa.New(modem, &cfg)
+	current := n.store.Snapshot()
+	client, err := lpa.New(modem, &current)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

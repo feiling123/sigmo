@@ -2,12 +2,9 @@ package modem
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -16,16 +13,11 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
-const (
-	networkPreferencesStateDirName  = "sigmo"
-	networkPreferencesStateFileName = "network-preferences.json"
-	networkPreferencesStateVersion  = 1
-)
-
 var networkPreferencesRetryInterval = 5 * time.Second
 
+var errNetworkPreferencesStorageRequired = errors.New("network preferences storage is required")
+
 type NetworkPreferences struct {
-	path  string
 	store *storage.Store
 	mu    sync.Mutex
 }
@@ -40,50 +32,11 @@ type savedNetworkPreferences struct {
 	Bands []ModemBand            `json:"bands,omitempty"`
 }
 
-type networkPreferencesStateFile struct {
-	Version int                                `json:"version"`
-	Modems  map[string]savedNetworkPreferences `json:"modems"`
-}
-
-func NewNetworkPreferences() (*NetworkPreferences, error) {
-	path, err := defaultNetworkPreferencesPath()
-	if err != nil {
-		return nil, fmt.Errorf("resolve network preferences state path: %w", err)
+func NewNetworkPreferences(store *storage.Store) (*NetworkPreferences, error) {
+	if store == nil {
+		return nil, errNetworkPreferencesStorageRequired
 	}
-	return NewNetworkPreferencesWithPath(path), nil
-}
-
-func NewNetworkPreferencesWithPath(path string) *NetworkPreferences {
-	return &NetworkPreferences{path: path}
-}
-
-func NewNetworkPreferencesWithStore(store *storage.Store) *NetworkPreferences {
-	return &NetworkPreferences{store: store}
-}
-
-func defaultNetworkPreferencesPath() (string, error) {
-	return networkPreferencesPathFromEnv(os.LookupEnv, os.UserHomeDir)
-}
-
-func networkPreferencesPathFromEnv(lookupEnv func(string) (string, bool), userHomeDir func() (string, error)) (string, error) {
-	if stateHome, ok := lookupEnv("XDG_STATE_HOME"); ok && stateHome != "" {
-		if !filepath.IsAbs(stateHome) {
-			return "", fmt.Errorf("XDG_STATE_HOME %q is relative", stateHome)
-		}
-		return filepath.Join(stateHome, networkPreferencesStateDirName, networkPreferencesStateFileName), nil
-	}
-
-	home, err := userHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve user home dir: %w", err)
-	}
-	if home == "" {
-		return "", errors.New("user home dir is empty")
-	}
-	if !filepath.IsAbs(home) {
-		return "", fmt.Errorf("user home dir %q is relative", home)
-	}
-	return filepath.Join(home, ".local", "state", networkPreferencesStateDirName, networkPreferencesStateFileName), nil
+	return &NetworkPreferences{store: store}, nil
 }
 
 func (p *NetworkPreferences) SaveMode(modemID string, mode ModemModePair) error {
@@ -199,38 +152,19 @@ func (p *NetworkPreferences) loadForModem(modemID string) (savedNetworkPreferenc
 }
 
 func (p *NetworkPreferences) loadForModemLocked(ctx context.Context, modemID string) (savedNetworkPreferences, bool, error) {
-	if p.store != nil {
-		var entry savedNetworkPreferences
-		err := p.store.Get(ctx, "modem:"+modemID, "network.preferences", &entry)
-		if errors.Is(err, storage.ErrNotFound) {
-			return savedNetworkPreferences{}, false, nil
-		}
-		if err != nil {
-			return savedNetworkPreferences{}, false, err
-		}
-		return entry, true, nil
+	var entry savedNetworkPreferences
+	err := p.store.Get(ctx, "modem:"+modemID, "network.preferences", &entry)
+	if errors.Is(err, storage.ErrNotFound) {
+		return savedNetworkPreferences{}, false, nil
 	}
-	store, err := readNetworkPreferencesState(p.path)
 	if err != nil {
 		return savedNetworkPreferences{}, false, err
-	}
-	entry, ok := store.Modems[modemID]
-	if !ok {
-		return savedNetworkPreferences{}, false, nil
 	}
 	return entry, true, nil
 }
 
 func (p *NetworkPreferences) saveForModemLocked(ctx context.Context, modemID string, entry savedNetworkPreferences) error {
-	if p.store != nil {
-		return p.store.Put(ctx, "modem:"+modemID, "network.preferences", entry)
-	}
-	store, err := readNetworkPreferencesState(p.path)
-	if err != nil {
-		return err
-	}
-	store.Modems[modemID] = entry
-	return writeNetworkPreferencesState(p.path, store)
+	return p.store.Put(ctx, "modem:"+modemID, "network.preferences", entry)
 }
 
 func restoreModePreference(ctx context.Context, m *Modem, mode ModemModePair) (bool, error) {
@@ -315,78 +249,4 @@ func duplicateBand(bands []ModemBand) bool {
 		seen[band] = struct{}{}
 	}
 	return false
-}
-
-func readNetworkPreferencesState(path string) (networkPreferencesStateFile, error) {
-	store := networkPreferencesStateFile{
-		Version: networkPreferencesStateVersion,
-		Modems:  make(map[string]savedNetworkPreferences),
-	}
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return store, nil
-	}
-	if err != nil {
-		return store, fmt.Errorf("read network preferences state: %w", err)
-	}
-	if len(data) == 0 {
-		return store, nil
-	}
-	if err := json.Unmarshal(data, &store); err != nil {
-		return networkPreferencesStateFile{}, fmt.Errorf("decode network preferences state: %w", err)
-	}
-	if store.Version != networkPreferencesStateVersion {
-		return networkPreferencesStateFile{}, fmt.Errorf("network preferences state version %d is unsupported", store.Version)
-	}
-	if store.Modems == nil {
-		store.Modems = make(map[string]savedNetworkPreferences)
-	}
-	return store, nil
-}
-
-func writeNetworkPreferencesState(path string, store networkPreferencesStateFile) error {
-	store.Version = networkPreferencesStateVersion
-	if store.Modems == nil {
-		store.Modems = make(map[string]savedNetworkPreferences)
-	}
-	data, err := json.MarshalIndent(store, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode network preferences state: %w", err)
-	}
-	data = append(data, '\n')
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create network preferences state directory: %w", err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return fmt.Errorf("secure network preferences state directory: %w", err)
-	}
-	tempFile, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("create network preferences state temp file: %w", err)
-	}
-	tempPath := tempFile.Name()
-	removeTemp := true
-	defer func() {
-		if removeTemp {
-			_ = os.Remove(tempPath)
-		}
-	}()
-	if _, err := tempFile.Write(data); err != nil {
-		_ = tempFile.Close()
-		return fmt.Errorf("write network preferences state temp file: %w", err)
-	}
-	if err := tempFile.Chmod(0o600); err != nil {
-		_ = tempFile.Close()
-		return fmt.Errorf("secure network preferences state temp file: %w", err)
-	}
-	if err := tempFile.Close(); err != nil {
-		return fmt.Errorf("close network preferences state temp file: %w", err)
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return fmt.Errorf("replace network preferences state file: %w", err)
-	}
-	removeTemp = false
-	return nil
 }

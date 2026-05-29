@@ -11,21 +11,21 @@ import (
 	"github.com/labstack/echo/v5"
 
 	appauth "github.com/damonto/sigmo/internal/app/auth"
-	"github.com/damonto/sigmo/internal/pkg/config"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 func TestOTPSend(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		config config.Config
-		want   error
+		name     string
+		settings settings.Settings
+		want     error
 	}{
 		{
 			name: "rejects missing auth providers",
-			config: config.Config{
-				App: config.App{
+			settings: settings.Settings{
+				App: settings.App{
 					OTPRequired: true,
 				},
 			},
@@ -33,16 +33,16 @@ func TestOTPSend(t *testing.T) {
 		},
 		{
 			name: "rejects disabled auth provider",
-			config: config.Config{
-				App: config.App{
+			settings: settings.Settings{
+				App: settings.App{
 					OTPRequired:   true,
 					AuthProviders: []string{"telegram"},
 				},
-				Channels: map[string]config.Channel{
+				Channels: map[string]settings.Channel{
 					"telegram": {
 						Enabled:    new(false),
 						BotToken:   "draft-token",
-						Recipients: config.Recipients{"123456"},
+						Recipients: settings.Recipients{"123456"},
 					},
 				},
 			},
@@ -50,8 +50,8 @@ func TestOTPSend(t *testing.T) {
 		},
 		{
 			name: "rejects missing configured channel",
-			config: config.Config{
-				App: config.App{
+			settings: settings.Settings{
+				App: settings.App{
 					OTPRequired:   true,
 					AuthProviders: []string{"telegram"},
 				},
@@ -66,8 +66,8 @@ func TestOTPSend(t *testing.T) {
 			t.Parallel()
 
 			store := appauth.NewStore()
-			configStore := config.NewStore(&tt.config)
-			otp := newOTP(configStore, store)
+			settingsStore := settings.NewMemoryStore(&tt.settings)
+			otp := newOTP(settingsStore, store)
 
 			err := otp.Send(context.Background())
 			if !errors.Is(err, tt.want) {
@@ -84,17 +84,17 @@ func TestEnabledAuthProviders(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		config config.Config
-		want   []string
+		name     string
+		settings settings.Settings
+		want     []string
 	}{
 		{
 			name: "normalizes provider names",
-			config: config.Config{
-				App: config.App{
+			settings: settings.Settings{
+				App: settings.App{
 					AuthProviders: []string{" Telegram "},
 				},
-				Channels: map[string]config.Channel{
+				Channels: map[string]settings.Channel{
 					"telegram": {
 						Enabled: new(true),
 					},
@@ -104,11 +104,11 @@ func TestEnabledAuthProviders(t *testing.T) {
 		},
 		{
 			name: "matches channel names case-insensitively",
-			config: config.Config{
-				App: config.App{
+			settings: settings.Settings{
+				App: settings.App{
 					AuthProviders: []string{"telegram"},
 				},
-				Channels: map[string]config.Channel{
+				Channels: map[string]settings.Channel{
 					"Telegram": {
 						Enabled: new(true),
 					},
@@ -123,7 +123,7 @@ func TestEnabledAuthProviders(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := enabledAuthProviders(tt.config)
+			got, err := enabledAuthProviders(tt.settings)
 			if err != nil {
 				t.Fatalf("enabledAuthProviders() error = %v", err)
 			}
@@ -137,16 +137,16 @@ func TestEnabledAuthProviders(t *testing.T) {
 func TestSendOTPRejectsInvalidAuthProviderConfig(t *testing.T) {
 	t.Parallel()
 
-	h := New(config.NewStore(&config.Config{
-		App: config.App{
+	h := New(settings.NewMemoryStore(&settings.Settings{
+		App: settings.App{
 			OTPRequired:   true,
 			AuthProviders: []string{"telegram"},
 		},
-		Channels: map[string]config.Channel{
+		Channels: map[string]settings.Channel{
 			"telegram": {
 				Enabled:    new(false),
 				BotToken:   "draft-token",
-				Recipients: config.Recipients{"123456"},
+				Recipients: settings.Recipients{"123456"},
 			},
 		},
 	}), appauth.NewStore())
@@ -208,8 +208,8 @@ func TestOTPVerify(t *testing.T) {
 				code = issued
 			}
 
-			configStore := config.NewStore(&config.Config{App: config.App{OTPRequired: tt.required}})
-			otp := newOTP(configStore, store)
+			settingsStore := settings.NewMemoryStore(&settings.Settings{App: settings.App{OTPRequired: tt.required}})
+			otp := newOTP(settingsStore, store)
 			token, err := otp.Verify(code)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Verify() error = %v, want %v", err, tt.wantErr)

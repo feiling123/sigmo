@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	notifybark "github.com/damonto/sigmo/internal/pkg/notify/bark"
 	notifyemail "github.com/damonto/sigmo/internal/pkg/notify/email"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
@@ -17,6 +16,7 @@ import (
 	notifysc3 "github.com/damonto/sigmo/internal/pkg/notify/sc3"
 	notifytelegram "github.com/damonto/sigmo/internal/pkg/notify/telegram"
 	notifywebhook "github.com/damonto/sigmo/internal/pkg/notify/webhook"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type Sender interface {
@@ -28,10 +28,10 @@ type Notifier struct {
 	channels map[string]Sender
 }
 
-// New creates a new Notifier from the given configuration.
-func New(cfg *config.Config) (*Notifier, error) {
-	channels := make(map[string]Sender, len(cfg.Channels))
-	for name, channel := range cfg.Channels {
+// New creates a new Notifier from the current settings.
+func New(currentSettings *settings.Settings) (*Notifier, error) {
+	channels := make(map[string]Sender, len(currentSettings.Channels))
+	for name, channel := range currentSettings.Channels {
 		if !channel.IsEnabled() {
 			continue
 		}
@@ -46,7 +46,7 @@ func New(cfg *config.Config) (*Notifier, error) {
 	return &Notifier{channels: channels}, nil
 }
 
-func createSender(name string, channel config.Channel) (Sender, error) {
+func createSender(name string, channel settings.Channel) (Sender, error) {
 	switch name {
 	case "telegram":
 		return notifytelegram.New(&channel)

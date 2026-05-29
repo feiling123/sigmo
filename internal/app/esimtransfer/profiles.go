@@ -15,12 +15,12 @@ import (
 	"github.com/damonto/ts43-go/ts43"
 
 	"github.com/damonto/sigmo/internal/pkg/carrier"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
-func (s *Service) profileResponses(ctx context.Context, cfg *config.Config, req ProfilesRequest) ([]ProfileResponse, error) {
-	candidates, err := s.profileCandidates(ctx, cfg, req)
+func (s *Service) profileResponses(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]ProfileResponse, error) {
+	candidates, err := s.profileCandidates(ctx, currentSettings, req)
 	if err != nil {
 		return nil, err
 	}
@@ -31,45 +31,45 @@ func (s *Service) profileResponses(ctx context.Context, cfg *config.Config, req 
 	return response, nil
 }
 
-func (s *Service) profileCandidates(ctx context.Context, cfg *config.Config, req ProfilesRequest) ([]profileCandidate, error) {
+func (s *Service) profileCandidates(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]profileCandidate, error) {
 	switch req.SourceType {
 	case SourceModem:
-		return s.modemProfileCandidates(ctx, cfg, req)
+		return s.modemProfileCandidates(ctx, currentSettings, req)
 	case SourceCCID:
-		return s.ccidProfileCandidates(ctx, cfg, req)
+		return s.ccidProfileCandidates(ctx, currentSettings, req)
 	default:
 		return nil, ErrSourceUnsupported
 	}
 }
 
-func (s *Service) modemProfileCandidates(ctx context.Context, cfg *config.Config, req ProfilesRequest) ([]profileCandidate, error) {
+func (s *Service) modemProfileCandidates(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]profileCandidate, error) {
 	modem, err := s.registry.Find(ctx, req.SourceID)
 	if err != nil {
 		return nil, err
 	}
-	profiles, err := sourceModemProfiles(modem, cfg)
+	profiles, err := sourceModemProfiles(modem, currentSettings)
 	if err == nil {
 		return esimCandidates(profiles), nil
 	}
 	if !errors.Is(err, ilpa.ErrNoSupportedAID) {
 		return nil, err
 	}
-	return s.physicalProfileCandidates(ctx, cfg, req)
+	return s.physicalProfileCandidates(ctx, currentSettings, req)
 }
 
-func (s *Service) ccidProfileCandidates(ctx context.Context, cfg *config.Config, req ProfilesRequest) ([]profileCandidate, error) {
-	profiles, err := sourceCCIDProfiles(cfg, req.SourceID)
+func (s *Service) ccidProfileCandidates(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]profileCandidate, error) {
+	profiles, err := sourceCCIDProfiles(currentSettings, req.SourceID)
 	if err == nil {
 		return esimCandidates(profiles), nil
 	}
 	if !errors.Is(err, ilpa.ErrNoSupportedAID) {
 		return nil, err
 	}
-	return s.physicalProfileCandidates(ctx, cfg, req)
+	return s.physicalProfileCandidates(ctx, currentSettings, req)
 }
 
-func (s *Service) physicalProfileCandidates(ctx context.Context, cfg *config.Config, req ProfilesRequest) ([]profileCandidate, error) {
-	source, err := s.openSource(ctx, cfg, Start{
+func (s *Service) physicalProfileCandidates(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]profileCandidate, error) {
+	source, err := s.openSource(ctx, currentSettings, Start{
 		SourceType: req.SourceType,
 		SourceID:   req.SourceID,
 		SourceIMEI: req.SourceIMEI,
@@ -87,12 +87,12 @@ func (s *Service) physicalProfileCandidates(ctx context.Context, cfg *config.Con
 	return []profileCandidate{candidate}, nil
 }
 
-func sourceCCIDProfiles(cfg *config.Config, sourceID string) ([]*sgp22.ProfileInfo, error) {
+func sourceCCIDProfiles(currentSettings *settings.Settings, sourceID string) ([]*sgp22.ProfileInfo, error) {
 	reader, err := openCCIDLPAReader(sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("open CCID reader: %w", err)
 	}
-	client, err := ilpa.NewWithChannel(sourceLockKey(SourceCCID, sourceID), "", reader, cfg)
+	client, err := ilpa.NewWithChannel(sourceLockKey(SourceCCID, sourceID), "", reader, currentSettings)
 	if err != nil {
 		return nil, fmt.Errorf("create source LPA client: %w", err)
 	}

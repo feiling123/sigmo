@@ -33,9 +33,9 @@ const { t } = useI18n()
           as-child
           variant="outline"
           size="icon"
-          :title="t('home.config')"
+          :title="t('home.settings')"
         >
-          <RouterLink :to="{ name: 'config' }">
+          <RouterLink :to="{ name: 'settings' }">
             <Settings class="size-5" />
           </RouterLink>
         </Button>

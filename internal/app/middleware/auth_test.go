@@ -8,7 +8,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/auth"
-	"github.com/damonto/sigmo/internal/pkg/config"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 func TestAuth(t *testing.T) {
@@ -43,7 +43,7 @@ func TestAuth(t *testing.T) {
 			t.Parallel()
 
 			authStore := auth.NewStore()
-			configStore := config.NewStore(&config.Config{App: config.App{OTPRequired: tt.required}})
+			settingsStore := settings.NewMemoryStore(&settings.Settings{App: settings.App{OTPRequired: tt.required}})
 			token := ""
 			if tt.withToken {
 				issued, _, err := authStore.IssueToken()
@@ -60,7 +60,7 @@ func TestAuth(t *testing.T) {
 			}
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
-			handler := Auth(authStore, configStore)(func(c *echo.Context) error {
+			handler := Auth(authStore, settingsStore)(func(c *echo.Context) error {
 				return c.NoContent(http.StatusNoContent)
 			})
 

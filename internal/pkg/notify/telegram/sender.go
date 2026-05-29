@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 const defaultEndpoint = "https://api.telegram.org"
@@ -22,11 +22,11 @@ type Sender struct {
 	recipients     []int64
 }
 
-func New(cfg *config.Channel) (*Sender, error) {
-	if strings.TrimSpace(cfg.BotToken) == "" {
+func New(channel *settings.Channel) (*Sender, error) {
+	if strings.TrimSpace(channel.BotToken) == "" {
 		return nil, errors.New("telegram bot token is required")
 	}
-	endpoint := strings.TrimSpace(cfg.Endpoint)
+	endpoint := strings.TrimSpace(channel.Endpoint)
 	if endpoint == "" {
 		endpoint = defaultEndpoint
 	}
@@ -34,7 +34,7 @@ func New(cfg *config.Channel) (*Sender, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing telegram endpoint: %w", err)
 	}
-	recipients, err := cfg.Recipients.Int64s()
+	recipients, err := channel.Recipients.Int64s()
 	if err != nil {
 		return nil, fmt.Errorf("parsing telegram recipients: %w", err)
 	}
@@ -43,7 +43,7 @@ func New(cfg *config.Channel) (*Sender, error) {
 	}
 
 	sendMessageURL := *baseURL
-	sendMessageURL.Path = path.Join(sendMessageURL.Path, "bot"+cfg.BotToken, "sendMessage")
+	sendMessageURL.Path = path.Join(sendMessageURL.Path, "bot"+channel.BotToken, "sendMessage")
 	return &Sender{
 		client:         &http.Client{Timeout: 10 * time.Second},
 		sendMessageURL: sendMessageURL.String(),

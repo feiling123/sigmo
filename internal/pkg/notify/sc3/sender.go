@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type Sender struct {
@@ -19,8 +19,8 @@ type Sender struct {
 	endpoint string
 }
 
-func New(cfg *config.Channel) (*Sender, error) {
-	endpoint := strings.TrimSpace(cfg.Endpoint)
+func New(channel *settings.Channel) (*Sender, error) {
+	endpoint := strings.TrimSpace(channel.Endpoint)
 	if endpoint == "" {
 		return nil, errors.New("sc3 endpoint is required")
 	}

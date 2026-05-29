@@ -11,14 +11,14 @@ import (
 	"github.com/damonto/euicc-go/bertlv"
 	sgp22 "github.com/damonto/euicc-go/v2"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type lifecycle struct {
-	cfg                *config.Config
-	store              *config.Store
+	settings           *settings.Settings
+	store              *settings.Store
 	newClient          lifecycleClientFactory
 	findModem          func(context.Context, string) (*mmodem.Modem, error)
 	waitForModemReload func(context.Context, *mmodem.Modem) (*mmodem.Modem, error)
@@ -43,7 +43,7 @@ type lifecycleClient interface {
 	Close() error
 }
 
-type lifecycleClientFactory func(*mmodem.Modem, *config.Config) (lifecycleClient, error)
+type lifecycleClientFactory func(*mmodem.Modem, *settings.Settings) (lifecycleClient, error)
 
 var (
 	errActiveProfileCannotDelete = errors.New("active profile cannot be deleted")
@@ -54,7 +54,7 @@ var (
 
 const enableReadyTimeout = 30 * time.Second
 
-func newLifecycle(store *config.Store, registry *mmodem.Registry) *lifecycle {
+func newLifecycle(store *settings.Store, registry *mmodem.Registry) *lifecycle {
 	return &lifecycle{
 		store:              store,
 		newClient:          newLifecycleClient,
@@ -67,34 +67,34 @@ func newLifecycle(store *config.Store, registry *mmodem.Registry) *lifecycle {
 	}
 }
 
-func newLifecycleClient(modem *mmodem.Modem, cfg *config.Config) (lifecycleClient, error) {
-	return lpa.New(modem, cfg)
+func newLifecycleClient(modem *mmodem.Modem, currentSettings *settings.Settings) (lifecycleClient, error) {
+	return lpa.New(modem, currentSettings)
 }
 
-func (l *lifecycle) configSnapshot() *config.Config {
+func (l *lifecycle) settingsSnapshot() *settings.Settings {
 	if l.store != nil {
-		cfg := l.store.Snapshot()
-		return &cfg
+		currentSettings := l.store.Snapshot()
+		return &currentSettings
 	}
-	if l.cfg != nil {
-		return l.cfg
+	if l.settings != nil {
+		return l.settings
 	}
-	return config.Default()
+	return settings.Default()
 }
 
-func (l *lifecycle) findModemConfig(id string) config.Modem {
+func (l *lifecycle) findModemConfig(id string) settings.Modem {
 	if l.store != nil {
 		return l.store.FindModem(id)
 	}
-	if l.cfg != nil {
-		return l.cfg.FindModem(id)
+	if l.settings != nil {
+		return l.settings.FindModem(id)
 	}
-	return config.Default().FindModem(id)
+	return settings.Default().FindModem(id)
 }
 
 func (l *lifecycle) PrepareEnable(modem *mmodem.Modem, iccid sgp22.ICCID) (*enableSession, error) {
-	cfg := l.configSnapshot()
-	client, err := l.newClient(modem, cfg)
+	currentSettings := l.settingsSnapshot()
+	client, err := l.newClient(modem, currentSettings)
 	if err != nil {
 		return nil, fmt.Errorf("create LPA client: %w", err)
 	}
@@ -201,8 +201,8 @@ func (s *enableSession) Close() {
 }
 
 func (l *lifecycle) Delete(modem *mmodem.Modem, iccid sgp22.ICCID) error {
-	cfg := l.configSnapshot()
-	client, err := l.newClient(modem, cfg)
+	currentSettings := l.settingsSnapshot()
+	client, err := l.newClient(modem, currentSettings)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}
@@ -244,8 +244,8 @@ func profileByICCID(profiles []*sgp22.ProfileInfo, iccid sgp22.ICCID) (*sgp22.Pr
 }
 
 func (l *lifecycle) sendPendingNotifications(modem *mmodem.Modem, lastSeq sgp22.SequenceNumber) error {
-	cfg := l.configSnapshot()
-	client, err := l.newClient(modem, cfg)
+	currentSettings := l.settingsSnapshot()
+	client, err := l.newClient(modem, currentSettings)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

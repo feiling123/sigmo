@@ -4,18 +4,18 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 
 import BackButton from '@/components/BackButton.vue'
-import ConfigAuthSection from '@/components/config/ConfigAuthSection.vue'
-import ConfigChannelsSection from '@/components/config/ConfigChannelsSection.vue'
-import ConfigRootSection from '@/components/config/ConfigRootSection.vue'
-import ConfigSaveButton from '@/components/config/ConfigSaveButton.vue'
+import SettingsAuthSection from '@/components/settings/SettingsAuthSection.vue'
+import SettingsChannelsSection from '@/components/settings/SettingsChannelsSection.vue'
+import SettingsRootSection from '@/components/settings/SettingsRootSection.vue'
+import SettingsSaveButton from '@/components/settings/SettingsSaveButton.vue'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useConfig } from '@/composables/useConfig'
-import { useConfigForm, type ConfigSectionKey } from '@/composables/useConfigForm'
+import { useSettings } from '@/composables/useSettings'
+import { useSettingsForm, type SettingsSectionKey } from '@/composables/useSettingsForm'
 
 const { t } = useI18n()
-const { config, values, isLoading, isSaving, fetchConfig, saveConfig } = useConfig()
+const { settings, values, isLoading, isSaving, fetchSettings, saveSettings } = useSettings()
 const {
   activeSection,
   appFields,
@@ -23,7 +23,6 @@ const {
   authFields,
   channels,
   channelSchemas,
-  configPath,
   enabledChannelSchemas,
   expandedChannels,
   initializeExpandedChannels,
@@ -34,19 +33,19 @@ const {
   setRootValue,
   toggleChannel,
   toggleChannelDetails,
-} = useConfigForm(config, values)
+} = useSettingsForm(settings, values)
 
 const sections = computed(() => [
-  { key: 'app' as const, label: t('config.appTitle'), description: t('config.appDescription') },
+  { key: 'app' as const, label: t('settings.appTitle'), description: t('settings.appDescription') },
   {
     key: 'proxy' as const,
-    label: t('config.proxyTitle'),
-    description: t('config.proxyDescription'),
+    label: t('settings.proxyTitle'),
+    description: t('settings.proxyDescription'),
   },
   {
     key: 'channels' as const,
-    label: t('config.channelsTitle'),
-    description: t('config.channelsDescription'),
+    label: t('settings.channelsTitle'),
+    description: t('settings.channelsDescription'),
   },
 ])
 const desktopMediaQuery = '(min-width: 768px)'
@@ -55,7 +54,7 @@ let isUnmounted = false
 let removeScrollSpy: (() => void) | null = null
 
 onMounted(async () => {
-  await fetchConfig()
+  await fetchSettings()
   if (isUnmounted) return
 
   initializeExpandedChannels()
@@ -71,20 +70,15 @@ onUnmounted(() => {
 })
 
 const handleSave = async () => {
-  const response = await saveConfig()
+  const response = await saveSettings()
   if (!response) return
 
   initializeExpandedChannels()
-  const restartFields = response.restartRequiredFields ?? []
-  if (restartFields.length > 0) {
-    toast.warning(t('config.restartRequired'))
-    return
-  }
-  toast.success(t('config.saveSuccess'))
+  toast.success(t('settings.saveSuccess'))
 }
 
-const sectionID = (section: ConfigSectionKey) => {
-  return `config-section-${section}`
+const sectionID = (section: SettingsSectionKey) => {
+  return `settings-section-${section}`
 }
 
 const isDesktopViewport = () => {
@@ -107,7 +101,7 @@ const updateActiveSectionFromScroll = () => {
     return
   }
 
-  let currentSection: ConfigSectionKey = 'app'
+  let currentSection: SettingsSectionKey = 'app'
   for (const section of sections.value) {
     const element = document.getElementById(sectionID(section.key))
     if (!element) continue
@@ -131,7 +125,7 @@ const setupScrollSpy = () => {
   }
 }
 
-const selectSection = (section: ConfigSectionKey) => {
+const selectSection = (section: SettingsSectionKey) => {
   activeSection.value = section
   if (!isDesktopViewport()) return
   document.getElementById(sectionID(section))?.scrollIntoView({
@@ -147,21 +141,15 @@ const selectSection = (section: ConfigSectionKey) => {
       class="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pb-28 pt-6 sm:px-6 md:pb-10 md:pt-8 lg:pt-10"
     >
       <header class="flex flex-col gap-5 border-b pb-5 md:pb-6">
-        <BackButton to="/" :label="t('config.back')" class="w-fit" />
+        <BackButton to="/" :label="t('settings.back')" class="w-fit" />
 
         <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div class="min-w-0 space-y-2">
             <h1 class="text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
-              {{ t('config.title') }}
+              {{ t('settings.title') }}
             </h1>
-            <p class="break-all text-sm text-muted-foreground">
-              {{ configPath }}
-            </p>
-            <p class="text-xs text-muted-foreground">
-              {{ t('config.restartHint') }}
-            </p>
           </div>
-          <ConfigSaveButton
+          <SettingsSaveButton
             class="hidden md:inline-flex"
             :disabled="!isReady || isSaving"
             :saving="isSaving"
@@ -172,7 +160,7 @@ const selectSection = (section: ConfigSectionKey) => {
 
       <div v-if="isLoading && !isReady" class="flex items-center justify-center py-24">
         <Spinner class="size-6 text-muted-foreground" />
-        <span class="sr-only">{{ t('config.loading') }}</span>
+        <span class="sr-only">{{ t('settings.loading') }}</span>
       </div>
 
       <div v-else-if="isReady" class="space-y-6">
@@ -189,7 +177,7 @@ const selectSection = (section: ConfigSectionKey) => {
 
         <div class="grid gap-8 md:grid-cols-[11rem_minmax(0,1fr)]">
           <aside class="hidden md:block">
-            <nav class="sticky top-8 space-y-1" aria-label="Configuration sections">
+            <nav class="sticky top-8 space-y-1" aria-label="Settings sections">
               <Button
                 v-for="section in sections"
                 :key="section.key"
@@ -212,11 +200,11 @@ const selectSection = (section: ConfigSectionKey) => {
           </aside>
 
           <div class="space-y-8 md:space-y-10">
-            <ConfigRootSection
+            <SettingsRootSection
               :id="sectionID('app')"
               section="app"
-              :title="t('config.appTitle')"
-              :description="t('config.appDescription')"
+              :title="t('settings.appTitle')"
+              :description="t('settings.appDescription')"
               :fields="appFields"
               :values="appValues"
               :disabled="isSaving"
@@ -224,7 +212,7 @@ const selectSection = (section: ConfigSectionKey) => {
               @update-field="(key, value) => setRootValue('app', key, value)"
             />
 
-            <ConfigAuthSection
+            <SettingsAuthSection
               :app="appValues"
               :enabled-channels="enabledChannelSchemas"
               :fields="authFields"
@@ -233,11 +221,11 @@ const selectSection = (section: ConfigSectionKey) => {
               @update-field="(key, value) => setRootValue('app', key, value)"
             />
 
-            <ConfigRootSection
+            <SettingsRootSection
               :id="sectionID('proxy')"
               section="proxy"
-              :title="t('config.proxyTitle')"
-              :description="t('config.proxyDescription')"
+              :title="t('settings.proxyTitle')"
+              :description="t('settings.proxyDescription')"
               :fields="proxyFields"
               :values="proxyValues"
               :disabled="isSaving"
@@ -246,10 +234,10 @@ const selectSection = (section: ConfigSectionKey) => {
               @update-field="(key, value) => setRootValue('proxy', key, value)"
             />
 
-            <ConfigChannelsSection
+            <SettingsChannelsSection
               :id="sectionID('channels')"
-              :title="t('config.channelsTitle')"
-              :description="t('config.channelsDescription')"
+              :title="t('settings.channelsTitle')"
+              :description="t('settings.channelsDescription')"
               :channels="channels"
               :disabled="isSaving"
               :expanded-channels="expandedChannels"
@@ -266,7 +254,7 @@ const selectSection = (section: ConfigSectionKey) => {
       <div
         class="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 p-4 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden"
       >
-        <ConfigSaveButton
+        <SettingsSaveButton
           class="w-full"
           :disabled="!isReady || isSaving"
           :saving="isSaving"

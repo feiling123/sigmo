@@ -14,10 +14,10 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/websheet"
 )
 
@@ -76,7 +76,7 @@ const (
 	wsTypeError                    = "error"
 )
 
-func New(store *config.Store, registry *mmodem.Registry, internetConnector *internet.Connector, websheets *websheet.Broker) *Handler {
+func New(store *settings.Store, registry *mmodem.Registry, internetConnector *internet.Connector, websheets *websheet.Broker) *Handler {
 	return &Handler{
 		registry:     registry,
 		profile:      newProfile(store),

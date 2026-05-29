@@ -1,9 +1,8 @@
-package config
+package settings
 
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"maps"
 	"net/http"
 	"slices"
@@ -13,30 +12,30 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	"github.com/damonto/sigmo/internal/app/httpapi"
-	pkgconfig "github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/notify"
+	appsettings "github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type Handler struct {
-	store             *pkgconfig.Store
+	store             *appsettings.Store
 	internetConnector *internet.Connector
 	relay             *forwarder.Relay
 }
 
 const (
-	errorCodeUpdateConfigInvalidRequest = "update_config_invalid_request"
-	errorCodeUpdateConfigInvalid        = "update_config_invalid"
-	errorCodeUpdateConfigFailed         = "update_config_failed"
-	errorCodeReloadProxyConfigFailed    = "reload_proxy_config_failed"
-	errorCodeReloadRelayFailed          = "reload_notification_relay_failed"
+	errorCodeUpdateSettingsInvalidRequest = "update_settings_invalid_request"
+	errorCodeUpdateSettingsInvalid        = "update_settings_invalid"
+	errorCodeUpdateSettingsFailed         = "update_settings_failed"
+	errorCodeReloadProxySettingsFailed    = "reload_proxy_settings_failed"
+	errorCodeReloadRelayFailed            = "reload_notification_relay_failed"
 )
 
 var (
 	errAuthProvidersRequired = errors.New("auth providers are required when otp is enabled")
 )
 
-func New(store *pkgconfig.Store, internetConnector *internet.Connector, relay *forwarder.Relay) *Handler {
+func New(store *appsettings.Store, internetConnector *internet.Connector, relay *forwarder.Relay) *Handler {
 	return &Handler{
 		store:             store,
 		internetConnector: internetConnector,
@@ -45,70 +44,64 @@ func New(store *pkgconfig.Store, internetConnector *internet.Connector, relay *f
 }
 
 func (h *Handler) Get(c *echo.Context) error {
-	cfg := h.store.Snapshot()
-	return c.JSON(http.StatusOK, responseFromConfig(cfg, nil))
+	current := h.store.Snapshot()
+	return c.JSON(http.StatusOK, responseFromSettings(current))
 }
 
 func (h *Handler) Update(c *echo.Context) error {
 	var req UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeUpdateConfigInvalidRequest, err)
+		return httpapi.BadRequest(c, errorCodeUpdateSettingsInvalidRequest, err)
 	}
 	req = normalizeRequest(req)
 	if err := c.Validate(&req); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateConfigInvalid, err)
+		return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalid, err)
 	}
 
-	current := h.store.Snapshot()
-	next := current.Clone()
-	next.App = appConfig(req.App)
+	next := h.store.Snapshot()
+	next.App = appSettingsFromValues(req.App)
 	next.Channels = normalizeChannels(req.Channels)
-	next.Proxy = proxyConfigFromValues(req.Proxy)
+	next.Proxy = proxySettingsFromValues(req.Proxy)
 
-	if err := validateConfig(next); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateConfigInvalid, err)
+	if err := validateSettings(next); err != nil {
+		return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalid, err)
 	}
 	if _, err := notify.New(&next); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateConfigInvalid, err)
+		return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalid, err)
 	}
 
-	restartRequiredFields := restartRequiredFields(current, next)
-	saved, err := h.store.Update(func(cfg *pkgconfig.Config) error {
-		cfg.App = next.App
-		cfg.Proxy = next.Proxy
-		cfg.Channels = next.Channels
+	saved, err := h.store.Update(c.Request().Context(), func(current *appsettings.Settings) error {
+		current.App = next.App
+		current.Proxy = next.Proxy
+		current.Channels = next.Channels
 		return nil
 	})
 	if err != nil {
-		return httpapi.Internal(c, errorCodeUpdateConfigFailed, fmt.Errorf("save config: %w", err))
+		return httpapi.Internal(c, errorCodeUpdateSettingsFailed, fmt.Errorf("save settings: %w", err))
 	}
 
-	applyLogLevel(saved)
-	httpapi.SetExposeInternalErrors(!saved.IsProduction())
-	if err := h.internetConnector.UpdateProxyConfig(proxyConfig(saved)); err != nil {
-		return httpapi.Internal(c, errorCodeReloadProxyConfigFailed, fmt.Errorf("saved config, reload proxy config: %w", err))
+	if err := h.internetConnector.UpdateProxyConfig(internetProxyConfig(saved)); err != nil {
+		return httpapi.Internal(c, errorCodeReloadProxySettingsFailed, fmt.Errorf("saved settings, reload proxy settings: %w", err))
 	}
 	if err := h.relay.Reload(); err != nil {
-		return httpapi.Internal(c, errorCodeReloadRelayFailed, fmt.Errorf("saved config, reload notification relay: %w", err))
+		return httpapi.Internal(c, errorCodeReloadRelayFailed, fmt.Errorf("saved settings, reload notification relay: %w", err))
 	}
 
-	return c.JSON(http.StatusOK, responseFromConfig(saved, restartRequiredFields))
+	return c.JSON(http.StatusOK, responseFromSettings(saved))
 }
 
-func responseFromConfig(cfg pkgconfig.Config, restartRequiredFields []string) Response {
+func responseFromSettings(current appsettings.Settings) Response {
 	return Response{
-		Path:                  cfg.Path,
-		Schema:                configSchema(),
-		Values:                valuesFromConfig(cfg),
-		RestartRequiredFields: restartRequiredFields,
+		Schema: settingsSchema(),
+		Values: valuesFromSettings(current),
 	}
 }
 
-func valuesFromConfig(cfg pkgconfig.Config) Values {
+func valuesFromSettings(current appsettings.Settings) Values {
 	return Values{
-		App:      appValuesFromConfig(cfg.App),
-		Proxy:    proxyValuesFromConfig(cfg.ProxySettings()),
-		Channels: channelValuesFromConfig(cfg.Channels),
+		App:      appValuesFromSettings(current.App),
+		Proxy:    proxyValuesFromSettings(current.ProxySettings()),
+		Channels: channelValuesFromSettings(current.Channels),
 	}
 }
 
@@ -120,25 +113,19 @@ func normalizeRequest(req UpdateRequest) UpdateRequest {
 }
 
 func normalizeAppValues(app AppValues) AppValues {
-	app.Environment = strings.ToLower(strings.TrimSpace(app.Environment))
-	app.ListenAddress = strings.TrimSpace(app.ListenAddress)
 	app.AuthProviders = trimNames(app.AuthProviders)
 	return app
 }
 
-func appConfig(app AppValues) pkgconfig.App {
-	return pkgconfig.App{
-		Environment:   app.Environment,
-		ListenAddress: app.ListenAddress,
+func appSettingsFromValues(app AppValues) appsettings.App {
+	return appsettings.App{
 		AuthProviders: normalizeNames(app.AuthProviders),
 		OTPRequired:   app.OTPRequired,
 	}
 }
 
-func appValuesFromConfig(app pkgconfig.App) AppValues {
+func appValuesFromSettings(app appsettings.App) AppValues {
 	return AppValues{
-		Environment:   app.Environment,
-		ListenAddress: app.ListenAddress,
 		AuthProviders: slices.Clone(app.AuthProviders),
 		OTPRequired:   app.OTPRequired,
 	}
@@ -149,8 +136,8 @@ func normalizeProxyValues(proxy ProxyValues) ProxyValues {
 	return proxy
 }
 
-func proxyConfigFromValues(proxy ProxyValues) *pkgconfig.Proxy {
-	return &pkgconfig.Proxy{
+func proxySettingsFromValues(proxy ProxyValues) *appsettings.Proxy {
+	return &appsettings.Proxy{
 		ListenAddress: proxy.ListenAddress,
 		HTTPPort:      proxy.HTTPPort,
 		SOCKS5Port:    proxy.SOCKS5Port,
@@ -158,7 +145,7 @@ func proxyConfigFromValues(proxy ProxyValues) *pkgconfig.Proxy {
 	}
 }
 
-func proxyValuesFromConfig(proxy pkgconfig.Proxy) ProxyValues {
+func proxyValuesFromSettings(proxy appsettings.Proxy) ProxyValues {
 	return ProxyValues{
 		ListenAddress: proxy.ListenAddress,
 		HTTPPort:      proxy.HTTPPort,
@@ -167,10 +154,10 @@ func proxyValuesFromConfig(proxy pkgconfig.Proxy) ProxyValues {
 	}
 }
 
-func normalizeChannels(channels map[string]ChannelValues) map[string]pkgconfig.Channel {
-	normalized := make(map[string]pkgconfig.Channel, len(channels))
+func normalizeChannels(channels map[string]ChannelValues) map[string]appsettings.Channel {
+	normalized := make(map[string]appsettings.Channel, len(channels))
 	for name, channel := range channels {
-		normalized[name] = channelConfig(name, channel)
+		normalized[name] = channelSettingsFromValues(name, channel)
 	}
 	return normalized
 }
@@ -239,8 +226,8 @@ func filterChannelValue(name string, channel ChannelValues) ChannelValues {
 	return values
 }
 
-func channelConfig(name string, channel ChannelValues) pkgconfig.Channel {
-	normalized := pkgconfig.Channel{
+func channelSettingsFromValues(name string, channel ChannelValues) appsettings.Channel {
+	normalized := appsettings.Channel{
 		Enabled: channel.Enabled,
 	}
 	switch name {
@@ -273,15 +260,15 @@ func channelConfig(name string, channel ChannelValues) pkgconfig.Channel {
 	return normalized
 }
 
-func channelValuesFromConfig(channels map[string]pkgconfig.Channel) map[string]ChannelValues {
+func channelValuesFromSettings(channels map[string]appsettings.Channel) map[string]ChannelValues {
 	values := make(map[string]ChannelValues, len(channels))
 	for name, channel := range channels {
-		values[name] = channelValues(name, channel)
+		values[name] = channelSettingsValues(name, channel)
 	}
 	return values
 }
 
-func channelValues(name string, channel pkgconfig.Channel) ChannelValues {
+func channelSettingsValues(name string, channel appsettings.Channel) ChannelValues {
 	enabled := channel.IsEnabled()
 	values := ChannelValues{
 		Enabled: &enabled,
@@ -346,10 +333,10 @@ func trimStringSlice(values []string) []string {
 	return trimmed
 }
 
-func normalizeRecipients(recipients []string) pkgconfig.Recipients {
-	normalized := make(pkgconfig.Recipients, 0, len(recipients))
+func normalizeRecipients(recipients []string) appsettings.Recipients {
+	normalized := make(appsettings.Recipients, 0, len(recipients))
 	for _, recipient := range recipients {
-		normalized = append(normalized, pkgconfig.Recipient(recipient))
+		normalized = append(normalized, appsettings.Recipient(recipient))
 	}
 	return normalized
 }
@@ -372,18 +359,18 @@ func normalizeHeaders(headers map[string]string) map[string]string {
 	return maps.Clone(headers)
 }
 
-func validateConfig(cfg pkgconfig.Config) error {
+func validateSettings(current appsettings.Settings) error {
 	allowedChannels := allowedChannelNames()
-	for name := range cfg.Channels {
+	for name := range current.Channels {
 		if _, ok := allowedChannels[name]; !ok {
 			return fmt.Errorf("unsupported channel %q", name)
 		}
 	}
-	if cfg.App.OTPRequired && len(cfg.App.AuthProviders) == 0 {
+	if current.App.OTPRequired && len(current.App.AuthProviders) == 0 {
 		return errAuthProvidersRequired
 	}
-	for _, provider := range cfg.App.AuthProviders {
-		channel, ok := cfg.Channels[provider]
+	for _, provider := range current.App.AuthProviders {
+		channel, ok := current.Channels[provider]
 		if !ok || !channel.IsEnabled() {
 			return fmt.Errorf("auth provider %q must be an enabled channel", provider)
 		}
@@ -392,7 +379,7 @@ func validateConfig(cfg pkgconfig.Config) error {
 }
 
 func allowedChannelNames() map[string]struct{} {
-	schema := configSchema()
+	schema := settingsSchema()
 	names := make(map[string]struct{}, len(schema.Channels))
 	for _, channel := range schema.Channels {
 		names[channel.Key] = struct{}{}
@@ -400,24 +387,8 @@ func allowedChannelNames() map[string]struct{} {
 	return names
 }
 
-func restartRequiredFields(oldConfig pkgconfig.Config, newConfig pkgconfig.Config) []string {
-	var fields []string
-	if oldConfig.App.ListenAddress != newConfig.App.ListenAddress {
-		fields = append(fields, "app.listenAddress")
-	}
-	return fields
-}
-
-func applyLogLevel(cfg pkgconfig.Config) {
-	if cfg.IsProduction() {
-		slog.SetLogLoggerLevel(slog.LevelInfo)
-		return
-	}
-	slog.SetLogLoggerLevel(slog.LevelDebug)
-}
-
-func proxyConfig(cfg pkgconfig.Config) internet.ProxyConfig {
-	proxy := cfg.ProxySettings()
+func internetProxyConfig(current appsettings.Settings) internet.ProxyConfig {
+	proxy := current.ProxySettings()
 	return internet.ProxyConfig{
 		ListenAddress: proxy.ListenAddress,
 		HTTPPort:      proxy.HTTPPort,

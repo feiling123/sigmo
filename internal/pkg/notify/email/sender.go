@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/wneessen/go-mail"
 )
 
@@ -17,35 +17,35 @@ type Sender struct {
 	recipients []string
 }
 
-func New(cfg *config.Channel) (*Sender, error) {
-	host := strings.TrimSpace(cfg.SMTPHost)
+func New(channel *settings.Channel) (*Sender, error) {
+	host := strings.TrimSpace(channel.SMTPHost)
 	if host == "" {
 		return nil, errors.New("email smtp_host is required")
 	}
-	if cfg.SMTPPort <= 0 {
+	if channel.SMTPPort <= 0 {
 		return nil, errors.New("email smtp_port is required")
 	}
-	from := strings.TrimSpace(cfg.From)
+	from := strings.TrimSpace(channel.From)
 	if from == "" {
 		return nil, errors.New("email from is required")
 	}
-	recipients := cfg.Recipients.Strings()
+	recipients := channel.Recipients.Strings()
 	if len(recipients) == 0 {
 		return nil, errors.New("email recipients are required")
 	}
 
-	tlsPolicy, err := parseTLSPolicy(cfg.TLSPolicy)
+	tlsPolicy, err := parseTLSPolicy(channel.TLSPolicy)
 	if err != nil {
 		return nil, err
 	}
 
-	options := []mail.Option{mail.WithPort(cfg.SMTPPort)}
-	if cfg.SSL {
+	options := []mail.Option{mail.WithPort(channel.SMTPPort)}
+	if channel.SSL {
 		options = append(options, mail.WithSSLPort(true))
 	}
 
-	username := strings.TrimSpace(cfg.SMTPUsername)
-	password := strings.TrimSpace(cfg.SMTPPassword)
+	username := strings.TrimSpace(channel.SMTPUsername)
+	password := strings.TrimSpace(channel.SMTPPassword)
 	if username != "" || password != "" {
 		if username == "" || password == "" {
 			return nil, errors.New("email smtp_username and smtp_password must be set together")

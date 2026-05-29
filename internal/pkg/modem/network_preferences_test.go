@@ -3,193 +3,102 @@ package modem
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
+
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
-func TestNetworkPreferencesPathFromEnv(t *testing.T) {
+func TestNewNetworkPreferencesRequiresStorage(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name    string
-		env     map[string]string
-		home    string
-		homeErr error
-		want    string
-		wantErr string
-	}{
-		{
-			name: "xdg state home",
-			env:  map[string]string{"XDG_STATE_HOME": "/var/lib/sigmo-state"},
-			home: "/home/sigmo",
-			want: "/var/lib/sigmo-state/sigmo/network-preferences.json",
-		},
-		{
-			name: "home default",
-			env:  map[string]string{},
-			home: "/home/sigmo",
-			want: "/home/sigmo/.local/state/sigmo/network-preferences.json",
-		},
-		{
-			name:    "relative xdg state home",
-			env:     map[string]string{"XDG_STATE_HOME": "state"},
-			home:    "/home/sigmo",
-			wantErr: "XDG_STATE_HOME",
-		},
-		{
-			name:    "home error",
-			env:     map[string]string{},
-			homeErr: errors.New("home missing"),
-			wantErr: "resolve user home dir",
-		},
-		{
-			name:    "empty home",
-			env:     map[string]string{},
-			wantErr: "user home dir is empty",
-		},
-		{
-			name:    "relative home",
-			env:     map[string]string{},
-			home:    "home/sigmo",
-			wantErr: "user home dir",
-		},
+	_, err := NewNetworkPreferences(nil)
+	if err == nil {
+		t.Fatal("NewNetworkPreferences() error = nil, want storage error")
 	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			lookupEnv := func(key string) (string, bool) {
-				value, ok := tt.env[key]
-				return value, ok
-			}
-			userHomeDir := func() (string, error) {
-				return tt.home, tt.homeErr
-			}
-
-			got, err := networkPreferencesPathFromEnv(lookupEnv, userHomeDir)
-			if tt.wantErr != "" {
-				if err == nil {
-					t.Fatal("networkPreferencesPathFromEnv() error = nil, want error")
-				}
-				if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("networkPreferencesPathFromEnv() error = %v, want it to contain %q", err, tt.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("networkPreferencesPathFromEnv() error = %v", err)
-			}
-			if got != tt.want {
-				t.Fatalf("networkPreferencesPathFromEnv() = %q, want %q", got, tt.want)
-			}
-		})
+	if !errors.Is(err, errNetworkPreferencesStorageRequired) {
+		t.Fatalf("NewNetworkPreferences() error = %v, want storage error", err)
 	}
 }
 
-func TestNetworkPreferencesStateForModem(t *testing.T) {
+func TestNetworkPreferencesStoreForModem(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
-		run  func(t *testing.T, path string)
+		name      string
+		modemID   string
+		save      func(*NetworkPreferences) error
+		assertion func(t *testing.T, got savedNetworkPreferences, ok bool)
 	}{
 		{
-			name: "save mode",
-			run: func(t *testing.T, path string) {
+			name:    "save mode",
+			modemID: "modem-1",
+			save: func(prefs *NetworkPreferences) error {
+				return prefs.SaveMode("modem-1", ModemModePair{Allowed: ModemMode4G, Preferred: ModemModeNone})
+			},
+			assertion: func(t *testing.T, got savedNetworkPreferences, ok bool) {
 				t.Helper()
-
-				prefs := NewNetworkPreferencesWithPath(path)
-				want := ModemModePair{Allowed: ModemMode4G, Preferred: ModemModeNone}
-				if err := prefs.SaveMode("modem-1", want); err != nil {
-					t.Fatalf("SaveMode() error = %v", err)
-				}
-
-				got, ok, err := prefs.loadForModem("modem-1")
-				if err != nil {
-					t.Fatalf("loadForModem() error = %v", err)
-				}
 				if !ok {
 					t.Fatal("loadForModem() ok = false, want true")
 				}
 				if got.Mode == nil {
 					t.Fatal("saved mode = nil, want value")
 				}
-				if got.Mode.Allowed != want.Allowed || got.Mode.Preferred != want.Preferred {
+				want := networkPreferenceMode{Allowed: ModemMode4G, Preferred: ModemModeNone}
+				if *got.Mode != want {
 					t.Fatalf("saved mode = %#v, want %#v", got.Mode, want)
 				}
-				assertNetworkPreferencePermissions(t, path)
 			},
 		},
 		{
-			name: "save bands",
-			run: func(t *testing.T, path string) {
+			name:    "save bands",
+			modemID: "modem-2",
+			save: func(prefs *NetworkPreferences) error {
+				return prefs.SaveBands("modem-2", []ModemBand{71, 378})
+			},
+			assertion: func(t *testing.T, got savedNetworkPreferences, ok bool) {
 				t.Helper()
-
-				prefs := NewNetworkPreferencesWithPath(path)
-				want := []ModemBand{71, 378}
-				if err := prefs.SaveBands("modem-1", want); err != nil {
-					t.Fatalf("SaveBands() error = %v", err)
-				}
-
-				got, ok, err := prefs.loadForModem("modem-1")
-				if err != nil {
-					t.Fatalf("loadForModem() error = %v", err)
-				}
 				if !ok {
 					t.Fatal("loadForModem() ok = false, want true")
 				}
+				want := []ModemBand{71, 378}
 				if !slices.Equal(got.Bands, want) {
 					t.Fatalf("saved bands = %#v, want %#v", got.Bands, want)
 				}
-				assertNetworkPreferencePermissions(t, path)
 			},
 		},
 		{
-			name: "overwrite modem keeps other field",
-			run: func(t *testing.T, path string) {
+			name:    "overwrite modem keeps other field",
+			modemID: "modem-3",
+			save: func(prefs *NetworkPreferences) error {
+				if err := prefs.SaveMode("modem-3", ModemModePair{Allowed: ModemMode4G, Preferred: ModemModeNone}); err != nil {
+					return err
+				}
+				return prefs.SaveBands("modem-3", []ModemBand{ModemBandAny})
+			},
+			assertion: func(t *testing.T, got savedNetworkPreferences, ok bool) {
 				t.Helper()
-
-				prefs := NewNetworkPreferencesWithPath(path)
-				if err := prefs.SaveMode("modem-1", ModemModePair{Allowed: ModemMode4G, Preferred: ModemModeNone}); err != nil {
-					t.Fatalf("SaveMode() error = %v", err)
-				}
-				wantBands := []ModemBand{ModemBandAny}
-				if err := prefs.SaveBands("modem-1", wantBands); err != nil {
-					t.Fatalf("SaveBands() error = %v", err)
-				}
-
-				got, ok, err := prefs.loadForModem("modem-1")
-				if err != nil {
-					t.Fatalf("loadForModem() error = %v", err)
-				}
 				if !ok {
 					t.Fatal("loadForModem() ok = false, want true")
 				}
 				if got.Mode == nil {
 					t.Fatal("saved mode = nil, want value")
 				}
-				if !slices.Equal(got.Bands, wantBands) {
-					t.Fatalf("saved bands = %#v, want %#v", got.Bands, wantBands)
+				if !slices.Equal(got.Bands, []ModemBand{ModemBandAny}) {
+					t.Fatalf("saved bands = %#v, want any", got.Bands)
 				}
 			},
 		},
 		{
-			name: "missing file is empty",
-			run: func(t *testing.T, path string) {
+			name:    "missing modem is empty",
+			modemID: "missing",
+			save:    func(*NetworkPreferences) error { return nil },
+			assertion: func(t *testing.T, _ savedNetworkPreferences, ok bool) {
 				t.Helper()
-
-				prefs := NewNetworkPreferencesWithPath(path)
-				_, ok, err := prefs.loadForModem("modem-1")
-				if err != nil {
-					t.Fatalf("loadForModem() error = %v", err)
-				}
 				if ok {
 					t.Fatal("loadForModem() ok = true, want false")
 				}
@@ -201,47 +110,20 @@ func TestNetworkPreferencesStateForModem(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			tt.run(t, filepath.Join(t.TempDir(), "network-preferences.json"))
-		})
-	}
-}
 
-func TestNetworkPreferencesStateReadErrors(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		content string
-		want    string
-	}{
-		{
-			name:    "corrupt json",
-			content: "{",
-			want:    "decode network preferences state",
-		},
-		{
-			name:    "unsupported version",
-			content: `{"version":99,"modems":{}}`,
-			want:    "unsupported",
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			path := filepath.Join(t.TempDir(), "network-preferences.json")
-			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
-				t.Fatalf("os.WriteFile() error = %v", err)
+			db := openNetworkPreferencesTestStore(t)
+			prefs, err := NewNetworkPreferences(db)
+			if err != nil {
+				t.Fatalf("NewNetworkPreferences() error = %v", err)
 			}
-			_, err := readNetworkPreferencesState(path)
-			if err == nil {
-				t.Fatal("readNetworkPreferencesState() error = nil, want error")
+			if err := tt.save(prefs); err != nil {
+				t.Fatalf("save() error = %v", err)
 			}
-			if !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("readNetworkPreferencesState() error = %v, want it to contain %q", err, tt.want)
+			got, ok, err := prefs.loadForModem(tt.modemID)
+			if err != nil {
+				t.Fatalf("loadForModem() error = %v", err)
 			}
+			tt.assertion(t, got, ok)
 		})
 	}
 }
@@ -382,24 +264,19 @@ func TestRestoreBandPreference(t *testing.T) {
 	}
 }
 
-func assertNetworkPreferencePermissions(t *testing.T, path string) {
+func openNetworkPreferencesTestStore(t *testing.T) *storage.Store {
 	t.Helper()
 
-	info, err := os.Stat(path)
+	db, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
-		t.Fatalf("os.Stat() error = %v", err)
+		t.Fatalf("storage.Open() error = %v", err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("state file mode = %#o, want %#o", got, os.FileMode(0o600))
-	}
-
-	info, err = os.Stat(filepath.Dir(path))
-	if err != nil {
-		t.Fatalf("os.Stat(dir) error = %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0o700 {
-		t.Fatalf("state directory mode = %#o, want %#o", got, os.FileMode(0o700))
-	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+	return db
 }
 
 func assertRestoreResult(t *testing.T, retry bool, err error, wantRetry bool, wantErr string) {

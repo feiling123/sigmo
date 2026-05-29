@@ -1,4 +1,4 @@
-export * from './config'
+export * from './settings'
 export * from './capability'
 export * from './call'
 export * from './esim'

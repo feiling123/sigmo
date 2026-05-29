@@ -18,10 +18,10 @@ import (
 	"github.com/damonto/euicc-go/driver/qmi"
 	"github.com/damonto/euicc-go/lpa"
 	sgp22 "github.com/damonto/euicc-go/v2"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/euicc"
 	"github.com/damonto/sigmo/internal/pkg/keymutex"
 	"github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 // gmu serializes LPA operations for the same modem or external reader. This is necessary
@@ -51,14 +51,14 @@ var AIDs = [][]byte{
 	{0xA0, 0x00, 0x00, 0x06, 0x28, 0x10, 0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0x89, 0x00, 0x00, 0x01, 0x00}, // GlocalMe
 }
 
-func New(m *modem.Modem, cfg *config.Config) (*LPA, error) {
+func New(m *modem.Modem, currentSettings *settings.Settings) (*LPA, error) {
 	gmu.Lock(m.EquipmentIdentifier)
 	ch, err := createChannel(m)
 	if err != nil {
 		gmu.Unlock(m.EquipmentIdentifier)
 		return nil, err
 	}
-	instance, err := newWithChannelLocked(m.EquipmentIdentifier, m.EquipmentIdentifier, ch, cfg)
+	instance, err := newWithChannelLocked(m.EquipmentIdentifier, m.EquipmentIdentifier, ch, currentSettings)
 	if err != nil {
 		_ = ch.Disconnect()
 		gmu.Unlock(m.EquipmentIdentifier)
@@ -67,11 +67,11 @@ func New(m *modem.Modem, cfg *config.Config) (*LPA, error) {
 	return instance, nil
 }
 
-func NewWithChannel(lockKey, configID string, ch apdu.SmartCardChannel, cfg *config.Config) (*LPA, error) {
+func NewWithChannel(lockKey, configID string, ch apdu.SmartCardChannel, currentSettings *settings.Settings) (*LPA, error) {
 	if lockKey != "" {
 		gmu.Lock(lockKey)
 	}
-	instance, err := newWithChannelLocked(lockKey, configID, ch, cfg)
+	instance, err := newWithChannelLocked(lockKey, configID, ch, currentSettings)
 	if err != nil {
 		if lockKey != "" {
 			gmu.Unlock(lockKey)
@@ -120,12 +120,12 @@ func (c *lockedChannel) CloseLogicalChannel(channel byte) error {
 	return nil
 }
 
-func newWithChannelLocked(lockKey, configID string, ch apdu.SmartCardChannel, cfg *config.Config) (*LPA, error) {
+func newWithChannelLocked(lockKey, configID string, ch apdu.SmartCardChannel, currentSettings *settings.Settings) (*LPA, error) {
 	instance := &LPA{lockKey: lockKey}
 	opts := &lpa.Options{
 		Channel:              ch,
 		AdminProtocolVersion: "2.2.0",
-		MSS:                  cfg.FindModem(configID).MSS,
+		MSS:                  currentSettings.FindModem(configID).MSS,
 	}
 	if err := instance.tryCreateClient(opts); err != nil {
 		return nil, err

@@ -19,11 +19,11 @@ import {
   TagsInputItemDelete,
   TagsInputItemText,
 } from '@/components/ui/tags-input'
-import type { ConfigField as ConfigFieldSchema } from '@/types/config'
+import type { SettingsField as SettingsFieldSchema } from '@/types/settings'
 
 const props = defineProps<{
   id?: string
-  field: ConfigFieldSchema
+  field: SettingsFieldSchema
   modelValue: unknown
   disabled?: boolean
 }>()

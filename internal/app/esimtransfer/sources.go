@@ -17,12 +17,12 @@ import (
 	tqmi "github.com/damonto/ts43-go/driver/qmi"
 	"github.com/damonto/ts43-go/ts43"
 
-	"github.com/damonto/sigmo/internal/pkg/config"
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
-func (s *Service) openSource(ctx context.Context, cfg *config.Config, start Start) (*sourceEndpoint, error) {
+func (s *Service) openSource(ctx context.Context, currentSettings *settings.Settings, start Start) (*sourceEndpoint, error) {
 	switch start.SourceType {
 	case SourceModem:
 		modem, err := s.registry.Find(ctx, start.SourceID)
@@ -106,7 +106,7 @@ func releaseSource(ch sourceCloser) func() {
 	}
 }
 
-func (s *Service) activateSourceProfile(ctx context.Context, cfg *config.Config, start Start, candidate profileCandidate) error {
+func (s *Service) activateSourceProfile(ctx context.Context, currentSettings *settings.Settings, start Start, candidate profileCandidate) error {
 	if candidate.response.Type == ProfilePhysical {
 		return nil
 	}
@@ -122,18 +122,18 @@ func (s *Service) activateSourceProfile(ctx context.Context, cfg *config.Config,
 		}
 		return s.enableModemSourceProfile(ctx, modem, iccid)
 	case SourceCCID:
-		return enableCCIDSourceProfile(cfg, start, iccid)
+		return enableCCIDSourceProfile(currentSettings, start, iccid)
 	default:
 		return ErrSourceUnsupported
 	}
 }
 
-func enableCCIDSourceProfile(cfg *config.Config, start Start, iccid sgp22.ICCID) error {
+func enableCCIDSourceProfile(currentSettings *settings.Settings, start Start, iccid sgp22.ICCID) error {
 	reader, err := openCCIDLPAReader(start.SourceID)
 	if err != nil {
 		return fmt.Errorf("open CCID reader: %w", err)
 	}
-	client, err := ilpa.NewWithChannel(sourceLockKey(start.SourceType, start.SourceID), "", reader, cfg)
+	client, err := ilpa.NewWithChannel(sourceLockKey(start.SourceType, start.SourceID), "", reader, currentSettings)
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
@@ -155,7 +155,7 @@ func enableCCIDSourceProfile(cfg *config.Config, start Start, iccid sgp22.ICCID)
 	return nil
 }
 
-func (s *Service) deleteSourceProfile(ctx context.Context, cfg *config.Config, start Start, rawICCID string) error {
+func (s *Service) deleteSourceProfile(ctx context.Context, currentSettings *settings.Settings, start Start, rawICCID string) error {
 	iccid, err := sgp22.NewICCID(rawICCID)
 	if err != nil {
 		return fmt.Errorf("parse source ICCID: %w", err)
@@ -165,20 +165,20 @@ func (s *Service) deleteSourceProfile(ctx context.Context, cfg *config.Config, s
 	}
 	switch start.SourceType {
 	case SourceModem:
-		return s.deleteModemSourceProfile(ctx, cfg, start, iccid)
+		return s.deleteModemSourceProfile(ctx, currentSettings, start, iccid)
 	case SourceCCID:
-		return deleteCCIDSourceProfile(cfg, start, iccid)
+		return deleteCCIDSourceProfile(currentSettings, start, iccid)
 	default:
 		return ErrSourceUnsupported
 	}
 }
 
-func (s *Service) deleteModemSourceProfile(ctx context.Context, cfg *config.Config, start Start, iccid sgp22.ICCID) error {
+func (s *Service) deleteModemSourceProfile(ctx context.Context, currentSettings *settings.Settings, start Start, iccid sgp22.ICCID) error {
 	modem, err := s.registry.Find(ctx, start.SourceID)
 	if err != nil {
 		return err
 	}
-	profiles, err := sourceModemProfiles(modem, cfg)
+	profiles, err := sourceModemProfiles(modem, currentSettings)
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,7 @@ func (s *Service) deleteModemSourceProfile(ctx context.Context, cfg *config.Conf
 		}
 		return s.deleteModemProfile(ctx, modem, iccid)
 	}
-	client, err := ilpa.New(modem, cfg)
+	client, err := ilpa.New(modem, currentSettings)
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
@@ -207,8 +207,8 @@ func (s *Service) deleteModemSourceProfile(ctx context.Context, cfg *config.Conf
 	return nil
 }
 
-func sourceModemProfiles(modem *mmodem.Modem, cfg *config.Config) ([]*sgp22.ProfileInfo, error) {
-	client, err := ilpa.New(modem, cfg)
+func sourceModemProfiles(modem *mmodem.Modem, currentSettings *settings.Settings) ([]*sgp22.ProfileInfo, error) {
+	client, err := ilpa.New(modem, currentSettings)
 	if err != nil {
 		return nil, fmt.Errorf("create source LPA client: %w", err)
 	}
@@ -238,12 +238,12 @@ func (s *Service) deleteModemProfile(ctx context.Context, modem *mmodem.Modem, i
 	return s.deleteProfile(ctx, modem, iccid)
 }
 
-func deleteCCIDSourceProfile(cfg *config.Config, start Start, iccid sgp22.ICCID) error {
+func deleteCCIDSourceProfile(currentSettings *settings.Settings, start Start, iccid sgp22.ICCID) error {
 	reader, err := openCCIDLPAReader(start.SourceID)
 	if err != nil {
 		return fmt.Errorf("open CCID reader: %w", err)
 	}
-	client, err := ilpa.NewWithChannel(sourceLockKey(start.SourceType, start.SourceID), "", reader, cfg)
+	client, err := ilpa.NewWithChannel(sourceLockKey(start.SourceType, start.SourceID), "", reader, currentSettings)
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
@@ -316,8 +316,8 @@ func sourceLockKey(sourceType SourceType, sourceID string) string {
 	return string(sourceType) + ":" + sourceID
 }
 
-func modemName(cfg *config.Config, modem *mmodem.Modem) string {
-	if alias := cfg.FindModem(modem.EquipmentIdentifier).Alias; alias != "" {
+func modemName(currentSettings *settings.Settings, modem *mmodem.Modem) string {
+	if alias := currentSettings.FindModem(modem.EquipmentIdentifier).Alias; alias != "" {
 		return alias
 	}
 	return modem.Model

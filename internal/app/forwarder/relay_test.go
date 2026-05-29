@@ -10,8 +10,8 @@ import (
 	"time"
 
 	pcall "github.com/damonto/sigmo/internal/pkg/call"
-	"github.com/damonto/sigmo/internal/pkg/config"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -24,7 +24,7 @@ func TestNewRequiresMessageStorage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(config.NewStore(config.Default()), nil, nil)
+			_, err := New(settings.NewMemoryStore(settings.Default()), nil, nil)
 			if err == nil {
 				t.Fatal("New() error = nil, want error")
 			}
@@ -120,15 +120,14 @@ func TestForwardCallNotifiesIncomingRingingOnce(t *testing.T) {
 	}
 	defer db.Close()
 
-	cfg := config.Default()
-	cfg.Path = filepath.Join(t.TempDir(), "config.toml")
-	cfg.Channels = map[string]config.Channel{
+	current := settings.Default()
+	current.Channels = map[string]settings.Channel{
 		"http": {Endpoint: server.URL},
 	}
-	cfg.Modems = map[string]config.Modem{
+	current.Modems = map[string]settings.Modem{
 		"modem-1": {Alias: "Office SIM"},
 	}
-	relay, err := New(config.NewStore(cfg), nil, db)
+	relay, err := New(settings.NewMemoryStore(current), nil, db)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

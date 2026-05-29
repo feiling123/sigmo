@@ -26,9 +26,6 @@ build/
 # Data directory
 data/
 
-# Configs
-configs/config.toml
-
 # macOS
 .DS_Store
 
@@ -44,4 +41,4 @@ CLAUDE.md
 tools/
 
 # Others
-configs/sigmo.db*
+sigmo.db*

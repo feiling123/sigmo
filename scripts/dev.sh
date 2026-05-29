@@ -7,7 +7,7 @@ source "${ROOT_DIR}/scripts/private-features.env"
 
 SSH_DIR="${SIGMO_SSH_DIR:-/home/user/.ssh}"
 SSH_KEY="${SIGMO_SSH_KEY:-${SSH_DIR}/id_ed25519}"
-CONFIG_FILE="${SIGMO_CONFIG:-configs/config.toml}"
+DB_PATH="${SIGMO_DB_PATH:-${ROOT_DIR}/build/sigmo-dev.db}"
 OUTPUT="${SIGMO_DEV_BIN:-${ROOT_DIR}/build/sigmo-dev}"
 GOPRIVATE_PATTERN="${GOPRIVATE:-${PRIVATE_GOPRIVATE}}"
 
@@ -55,7 +55,7 @@ fi
 
 args=("$@")
 if [ "${#args[@]}" -eq 0 ]; then
-	args=(-config "${CONFIG_FILE}")
+	args=(--db-path "${DB_PATH}" --debug)
 fi
 
 if [ "${SIGMO_BUILD_ONLY:-}" = "1" ]; then
