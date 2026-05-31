@@ -55,15 +55,32 @@ func TestParseProxyBasicAuth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			gotUser, gotPassword, gotOK := parseProxyBasicAuth(tt.header)
+			var auth proxyBasicAuth
+			err := auth.UnmarshalText([]byte(tt.header))
+			gotOK := err == nil
 			if gotOK != tt.wantOK {
-				t.Fatalf("parseProxyBasicAuth() ok = %v, want %v", gotOK, tt.wantOK)
+				t.Fatalf("proxyBasicAuth.UnmarshalText() ok = %v, want %v", gotOK, tt.wantOK)
 			}
-			if gotUser != tt.wantUser {
-				t.Fatalf("parseProxyBasicAuth() user = %q, want %q", gotUser, tt.wantUser)
+			if auth.Username != tt.wantUser {
+				t.Fatalf("proxyBasicAuth.Username = %q, want %q", auth.Username, tt.wantUser)
 			}
-			if gotPassword != tt.wantPassword {
-				t.Fatalf("parseProxyBasicAuth() password = %q, want %q", gotPassword, tt.wantPassword)
+			if auth.Password != tt.wantPassword {
+				t.Fatalf("proxyBasicAuth.Password = %q, want %q", auth.Password, tt.wantPassword)
+			}
+			if !tt.wantOK {
+				return
+			}
+
+			text, err := auth.MarshalText()
+			if err != nil {
+				t.Fatalf("proxyBasicAuth.MarshalText() error = %v", err)
+			}
+			var roundTrip proxyBasicAuth
+			if err := roundTrip.UnmarshalText(text); err != nil {
+				t.Fatalf("proxyBasicAuth.UnmarshalText(roundTrip) error = %v", err)
+			}
+			if roundTrip != auth {
+				t.Fatalf("proxyBasicAuth round trip = %#v, want %#v", roundTrip, auth)
 			}
 		})
 	}

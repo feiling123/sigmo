@@ -34,6 +34,7 @@ type Modem struct {
 	PrimarySimSlot      uint32
 	Sim                 *SIM
 	State               ModemState
+	UnlockRequired      ModemLock
 }
 
 type ModemPort struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/godbus/dbus/v5"
@@ -124,7 +125,7 @@ func (s *Service) send(ctx context.Context, device modemDevice, to string, text 
 		if err != nil {
 			return "", fmt.Errorf("send SMS to %s over wifi calling: %w", to, err)
 		}
-		if _, err := s.store.InsertMessage(ctx, msg); err != nil {
+		if err := s.insertSentMessage(ctx, msg); err != nil {
 			return "", err
 		}
 		return to, nil
@@ -134,16 +135,37 @@ func (s *Service) send(ctx context.Context, device modemDevice, to string, text 
 		if settings.Connected {
 			msg, werr := s.wifiCalling.SendSMS(ctx, device.modem(), to, text)
 			if werr == nil {
-				_, ierr := s.store.InsertMessage(ctx, msg)
-				return to, ierr
+				return to, s.insertSentMessage(ctx, msg)
 			}
 		}
 		return "", fmt.Errorf("send SMS to %s: %w", to, err)
 	}
-	if _, err := s.store.InsertMessage(ctx, messageFromModemSMS(device, profileID, sms)); err != nil {
+	if err := s.insertSentMessage(ctx, messageFromModemSMS(device, profileID, sms)); err != nil {
 		return "", err
 	}
 	return to, nil
+}
+
+func (s *Service) insertSentMessage(ctx context.Context, msg storage.Message) error {
+	inserted, err := s.store.InsertMessage(ctx, msg)
+	if err != nil {
+		return err
+	}
+	if !inserted {
+		slog.Warn("sent SMS was not inserted",
+			"profile_id", msg.ProfileID,
+			"source", msg.Source,
+			"external_key", msg.ExternalKey,
+			"recipient", msg.Recipient,
+			"timestamp", msg.Timestamp,
+		)
+	}
+	if msg.Source == storage.MessageSourceWiFiCalling && s.wifiCalling != nil {
+		if err := s.wifiCalling.ApplyPendingSMSStatus(ctx, msg); err != nil {
+			return fmt.Errorf("apply wifi calling SMS status: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) SyncModemMessages(ctx context.Context, modem *mmodem.Modem, profileID string) error {

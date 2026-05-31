@@ -19,6 +19,10 @@ type UpdateMSISDNRequest struct {
 	Number string `json:"number" validate:"required"`
 }
 
+type UnlockSIMRequest struct {
+	PIN string `json:"pin"`
+}
+
 type UpdateModemSettingsRequest struct {
 	Alias      string `json:"alias"`
 	Compatible *bool  `json:"compatible" validate:"required"`
@@ -37,11 +41,13 @@ type UpdateWiFiCallingSettingsRequest struct {
 }
 
 type WiFiCallingSettingsResponse struct {
-	Enabled   bool           `json:"enabled"`
-	Preferred bool           `json:"preferred"`
-	Connected bool           `json:"connected"`
-	State     string         `json:"state"`
-	Websheet  *websheet.Info `json:"websheet,omitempty"`
+	Enabled                         bool           `json:"enabled"`
+	Preferred                       bool           `json:"preferred"`
+	Connected                       bool           `json:"connected"`
+	State                           string         `json:"state"`
+	DurationSeconds                 int64          `json:"durationSeconds"`
+	EmergencyAddressUpdateAvailable bool           `json:"emergencyAddressUpdateAvailable"`
+	Websheet                        *websheet.Info `json:"websheet,omitempty"`
 }
 
 type ModemResponse struct {
@@ -51,6 +57,9 @@ type ModemResponse struct {
 	HardwareRevision     string                     `json:"hardwareRevision"`
 	Name                 string                     `json:"name"`
 	Number               string                     `json:"number,omitempty"`
+	State                string                     `json:"state"`
+	UnlockRequired       string                     `json:"unlockRequired"`
+	UnlockSupported      bool                       `json:"unlockSupported"`
 	SIM                  SlotResponse               `json:"sim"`
 	Slots                []SlotResponse             `json:"slots"`
 	AccessTechnology     string                     `json:"accessTechnology"`

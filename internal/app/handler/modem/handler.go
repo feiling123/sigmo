@@ -39,6 +39,11 @@ const (
 	errorCodeSimSlotNotFound                         = "sim_slot_not_found"
 	errorCodeSimSlotAlreadyActive                    = "sim_slot_already_active"
 	errorCodeSimSlotSwitchTimeout                    = "sim_slot_switch_timeout"
+	errorCodeUnlockSIMInvalidRequest                 = "unlock_sim_invalid_request"
+	errorCodeUnlockSIMNotRequired                    = "unlock_sim_not_required"
+	errorCodeUnlockSIMUnsupportedLock                = "unlock_sim_unsupported_lock"
+	errorCodeUnlockSIMFailed                         = "unlock_sim_failed"
+	errorCodeEnableModemAfterUnlockFailed            = "enable_modem_after_unlock_failed"
 	errorCodeUpdateMSISDNInvalidRequest              = "update_msisdn_invalid_request"
 	errorCodeUpdateMSISDNFailed                      = "update_msisdn_failed"
 	errorCodeInvalidPhoneNumber                      = "invalid_phone_number"
@@ -50,7 +55,11 @@ const (
 	errorCodeUpdateWiFiCallingSettingsInvalidRequest = "update_wifi_calling_settings_invalid_request"
 	errorCodeUpdateWiFiCallingSettingsFailed         = "update_wifi_calling_settings_failed"
 	errorCodeStartWiFiCallingWebsheetFailed          = "start_wifi_calling_websheet_failed"
+	errorCodeStartWiFiCallingE911WebsheetFailed      = "start_wifi_calling_e911_websheet_failed"
 	errorCodeWiFiCallingWebsheetNotPending           = "wifi_calling_websheet_not_pending"
+	errorCodeWiFiCallingEntitlementPending           = "wifi_calling_entitlement_pending"
+	errorCodeWiFiCallingEntitlementDenied            = "wifi_calling_entitlement_denied"
+	errorCodeWiFiCallingWebsheetUnavailable          = "wifi_calling_websheet_unavailable"
 )
 
 var (
@@ -89,6 +98,36 @@ func (h *Handler) Get(c *echo.Context) error {
 		return httpapi.Internal(c, errorCodeGetModemFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) UnlockSIM(c *echo.Context) error {
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeUnlockSIMFailed)
+	}
+	var req UnlockSIMRequest
+	if err := c.Bind(&req); err != nil {
+		return httpapi.BadRequest(c, errorCodeUnlockSIMInvalidRequest, err)
+	}
+	if err := modem.UnlockSIMPinAndEnable(c.Request().Context(), req.PIN); err != nil {
+		return unlockSIMError(c, err)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func unlockSIMError(c *echo.Context, err error) error {
+	switch {
+	case errors.Is(err, mmodem.ErrSIMPinRequired):
+		return httpapi.BadRequest(c, errorCodeUnlockSIMInvalidRequest, err)
+	case errors.Is(err, mmodem.ErrSIMUnlockNotRequired):
+		return httpapi.BadRequest(c, errorCodeUnlockSIMNotRequired, err)
+	case errors.Is(err, mmodem.ErrSIMUnlockUnsupportedLock):
+		return httpapi.BadRequest(c, errorCodeUnlockSIMUnsupportedLock, err)
+	case errors.Is(err, mmodem.ErrEnableAfterSIMUnlock):
+		return httpapi.Internal(c, errorCodeEnableModemAfterUnlockFailed, err)
+	default:
+		return httpapi.Internal(c, errorCodeUnlockSIMFailed, err)
+	}
 }
 
 func (h *Handler) SwitchSimSlot(c *echo.Context) error {
@@ -212,11 +251,13 @@ func (h *Handler) GetWiFiCallingSettings(c *echo.Context) error {
 		return httpapi.Internal(c, errorCodeGetWiFiCallingSettingsFailed, err)
 	}
 	return c.JSON(http.StatusOK, WiFiCallingSettingsResponse{
-		Enabled:   status.Enabled,
-		Preferred: status.Preferred,
-		Connected: status.Connected,
-		State:     status.State,
-		Websheet:  status.Websheet,
+		Enabled:                         status.Enabled,
+		Preferred:                       status.Preferred,
+		Connected:                       status.Connected,
+		State:                           status.State,
+		DurationSeconds:                 status.DurationSeconds,
+		EmergencyAddressUpdateAvailable: h.wifiCalling.EmergencyAddressUpdateAvailable(c.Request().Context(), modem),
+		Websheet:                        status.Websheet,
 	})
 }
 
@@ -233,4 +274,29 @@ func (h *Handler) StartWiFiCallingWebsheet(c *echo.Context) error {
 		return httpapi.Internal(c, errorCodeStartWiFiCallingWebsheetFailed, err)
 	}
 	return c.JSON(http.StatusCreated, info)
+}
+
+func (h *Handler) StartWiFiCallingEmergencyAddressWebsheet(c *echo.Context) error {
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeStartWiFiCallingE911WebsheetFailed)
+	}
+	info, err := h.wifiCalling.StartEmergencyAddressUpdate(c.Request().Context(), modem)
+	if err != nil {
+		return h.wifiCallingWebsheetStartError(c, errorCodeStartWiFiCallingE911WebsheetFailed, err)
+	}
+	return c.JSON(http.StatusCreated, info)
+}
+
+func (h *Handler) wifiCallingWebsheetStartError(c *echo.Context, fallbackCode string, err error) error {
+	switch {
+	case errors.Is(err, wificalling.ErrEntitlementPending):
+		return httpapi.TooManyRequests(c, errorCodeWiFiCallingEntitlementPending, err)
+	case errors.Is(err, wificalling.ErrEntitlementDenied):
+		return httpapi.BadRequest(c, errorCodeWiFiCallingEntitlementDenied, err)
+	case errors.Is(err, wificalling.ErrUnavailable), errors.Is(err, wificalling.ErrWebsheetUnavailable):
+		return httpapi.BadRequest(c, errorCodeWiFiCallingWebsheetUnavailable, err)
+	default:
+		return httpapi.Internal(c, fallbackCode, err)
+	}
 }

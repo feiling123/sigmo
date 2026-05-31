@@ -20,6 +20,100 @@ const (
 	ModemStateConnected                           // One or more packet data bearers is active and connected.
 )
 
+func (m ModemState) String() string {
+	switch m {
+	case ModemStateFailed:
+		return "Failed"
+	case ModemStateUnknown:
+		return "Unknown"
+	case ModemStateInitializing:
+		return "Initializing"
+	case ModemStateLocked:
+		return "Locked"
+	case ModemStateDisabled:
+		return "Disabled"
+	case ModemStateDisabling:
+		return "Disabling"
+	case ModemStateEnabling:
+		return "Enabling"
+	case ModemStateEnabled:
+		return "Enabled"
+	case ModemStateSearching:
+		return "Searching"
+	case ModemStateRegistered:
+		return "Registered"
+	case ModemStateDisconnecting:
+		return "Disconnecting"
+	case ModemStateConnecting:
+		return "Connecting"
+	case ModemStateConnected:
+		return "Connected"
+	default:
+		return "Unknown"
+	}
+}
+
+type ModemLock uint32
+
+const (
+	ModemLockUnknown ModemLock = iota
+	ModemLockNone
+	ModemLockSimPin
+	ModemLockSimPin2
+	ModemLockSimPuk
+	ModemLockSimPuk2
+	ModemLockPhSPPin
+	ModemLockPhSPPuk
+	ModemLockPhNetPin
+	ModemLockPhNetPuk
+	ModemLockPhSimPin
+	ModemLockPhCorpPin
+	ModemLockPhCorpPuk
+	ModemLockPhFSimPin
+	ModemLockPhFSimPuk
+	ModemLockPhNetSubPin
+	ModemLockPhNetSubPuk
+)
+
+func (m ModemLock) String() string {
+	switch m {
+	case ModemLockNone:
+		return "none"
+	case ModemLockSimPin:
+		return "sim-pin"
+	case ModemLockSimPin2:
+		return "sim-pin2"
+	case ModemLockSimPuk:
+		return "sim-puk"
+	case ModemLockSimPuk2:
+		return "sim-puk2"
+	case ModemLockPhSPPin:
+		return "ph-sp-pin"
+	case ModemLockPhSPPuk:
+		return "ph-sp-puk"
+	case ModemLockPhNetPin:
+		return "ph-net-pin"
+	case ModemLockPhNetPuk:
+		return "ph-net-puk"
+	case ModemLockPhSimPin:
+		return "ph-sim-pin"
+	case ModemLockPhCorpPin:
+		return "ph-corp-pin"
+	case ModemLockPhCorpPuk:
+		return "ph-corp-puk"
+	case ModemLockPhFSimPin:
+		return "ph-fsim-pin"
+	case ModemLockPhFSimPuk:
+		return "ph-fsim-puk"
+	case ModemLockPhNetSubPin:
+		return "ph-netsub-pin"
+	case ModemLockPhNetSubPuk:
+		return "ph-netsub-puk"
+	default:
+		return "unknown"
+	}
+}
+
 type ModemPortType uint32
 
 const (

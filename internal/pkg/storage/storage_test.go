@@ -221,6 +221,135 @@ func TestMessages(t *testing.T) {
 	})
 }
 
+func TestUpdateMessageStatus(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	base := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	messages := []Message{
+		{
+			ModemID:     "modem-a",
+			ProfileID:   "profile-a",
+			Source:      MessageSourceWiFiCalling,
+			ExternalKey: "outgoing-1",
+			Sender:      "+100",
+			Recipient:   "+200",
+			Text:        "hello",
+			Timestamp:   base,
+			Status:      "sent",
+			WiFiCalling: true,
+		},
+		{
+			ModemID:     "modem-a",
+			ProfileID:   "profile-a",
+			Source:      MessageSourceModem,
+			ExternalKey: "outgoing-1",
+			Sender:      "+100",
+			Recipient:   "+200",
+			Text:        "hello",
+			Timestamp:   base,
+			Status:      "sent",
+		},
+		{
+			ModemID:     "modem-a",
+			ProfileID:   "profile-b",
+			Source:      MessageSourceWiFiCalling,
+			ExternalKey: "outgoing-1",
+			Sender:      "+100",
+			Recipient:   "+200",
+			Text:        "hello",
+			Timestamp:   base.Add(time.Second),
+			Status:      "sent",
+			WiFiCalling: true,
+		},
+	}
+	for _, msg := range messages {
+		if _, err := store.InsertMessage(ctx, msg); err != nil {
+			t.Fatalf("InsertMessage() error = %v", err)
+		}
+	}
+
+	tests := []struct {
+		name        string
+		profileID   string
+		source      string
+		externalKey string
+		status      string
+		wantUpdated bool
+		wantStatus  string
+		wantErr     bool
+	}{
+		{
+			name:        "updates matching message",
+			profileID:   "profile-a",
+			source:      MessageSourceWiFiCalling,
+			externalKey: "outgoing-1",
+			status:      "DELIVERED",
+			wantUpdated: true,
+			wantStatus:  "delivered",
+		},
+		{
+			name:        "unknown message is ignored",
+			profileID:   "profile-a",
+			source:      MessageSourceWiFiCalling,
+			externalKey: "missing",
+			status:      "failed",
+			wantStatus:  "delivered",
+		},
+		{
+			name:        "empty status is rejected",
+			profileID:   "profile-a",
+			source:      MessageSourceWiFiCalling,
+			externalKey: "outgoing-1",
+			status:      " ",
+			wantStatus:  "delivered",
+			wantErr:     true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			updated, err := store.UpdateMessageStatus(ctx, MessageStatusUpdate{
+				ProfileID:   tt.profileID,
+				Source:      tt.source,
+				ExternalKey: tt.externalKey,
+				Status:      tt.status,
+			})
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("UpdateMessageStatus() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("UpdateMessageStatus() error = %v", err)
+			}
+			if updated != tt.wantUpdated {
+				t.Fatalf("UpdateMessageStatus() = %v, want %v", updated, tt.wantUpdated)
+			}
+			got, err := store.ListByParticipant(ctx, "profile-a", "+200")
+			if err != nil {
+				t.Fatalf("ListByParticipant() error = %v", err)
+			}
+			statuses := make(map[string]string)
+			for _, msg := range got {
+				statuses[msg.Source] = msg.Status
+			}
+			if statuses[MessageSourceWiFiCalling] != tt.wantStatus {
+				t.Fatalf("wifi calling status = %q, want %q", statuses[MessageSourceWiFiCalling], tt.wantStatus)
+			}
+			if statuses[MessageSourceModem] != "sent" {
+				t.Fatalf("modem status = %q, want sent", statuses[MessageSourceModem])
+			}
+			other, err := store.ListByParticipant(ctx, "profile-b", "+200")
+			if err != nil {
+				t.Fatalf("ListByParticipant(other) error = %v", err)
+			}
+			if len(other) != 1 || other[0].Status != "sent" {
+				t.Fatalf("other profile messages = %+v, want untouched sent", other)
+			}
+		})
+	}
+}
+
 func TestCallsPersistAndListByModem(t *testing.T) {
 	ctx := context.Background()
 	store := testStore(t)

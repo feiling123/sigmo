@@ -20,6 +20,7 @@ func (m *Modem) SIMs() *SIMs {
 }
 
 type SIM struct {
+	dbusObject         dbus.BusObject
 	Path               dbus.ObjectPath
 	Active             bool
 	Identifier         string
@@ -37,21 +38,36 @@ func (s *SIMs) Primary(ctx context.Context) (*SIM, error) {
 	return s.Get(ctx, s.modem.Sim.Path)
 }
 
+func (sims *SIMs) Reference(path dbus.ObjectPath) (*SIM, error) {
+	if path == "" || path == "/" {
+		return nil, errors.New("SIM path is required")
+	}
+	sim := &SIM{Path: path}
+	if sims.modem.dbusConn != nil {
+		sim.dbusObject = sims.modem.dbusConn.Object(ModemManagerInterface, path)
+	}
+	return sim, nil
+}
+
 func (sims *SIMs) Get(ctx context.Context, path dbus.ObjectPath) (*SIM, error) {
 	if path == "" || path == "/" {
 		return nil, errors.New("SIM path is required")
 	}
 	var variant dbus.Variant
 	var err error
-	sim := &SIM{Path: path}
+	sim, err := sims.Reference(path)
+	if err != nil {
+		return nil, err
+	}
 	var dbusObject dbus.BusObject
-	if sims.modem.dbusConn != nil {
-		dbusObject = sims.modem.dbusConn.Object(ModemManagerInterface, path)
+	if sim.dbusObject != nil {
+		dbusObject = sim.dbusObject
 	} else {
 		dbusObject, err = systemBusObject(path)
 		if err != nil {
 			return nil, err
 		}
+		sim.dbusObject = dbusObject
 	}
 
 	variant, err = dbusProperty(ctx, dbusObject, ModemSimInterface, "Active")
@@ -94,4 +110,19 @@ func (sims *SIMs) Get(ctx context.Context, path dbus.ObjectPath) (*SIM, error) {
 		sim.GID1 = strings.ToUpper(hex.EncodeToString(bytesFromVariant(variant)))
 	}
 	return sim, nil
+}
+
+func (s *SIM) SendPin(ctx context.Context, pin string) error {
+	if s == nil || !validSIMObjectPath(s.Path) {
+		return errors.New("SIM path is required")
+	}
+	dbusObject := s.dbusObject
+	if dbusObject == nil {
+		var err error
+		dbusObject, err = systemBusObject(s.Path)
+		if err != nil {
+			return err
+		}
+	}
+	return dbusObject.CallWithContext(ctx, ModemSimInterface+".SendPin", 0, pin).Err
 }

@@ -4,6 +4,7 @@ package wificalling
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"github.com/damonto/vowifi-go/driver/qmi"
 	imssip "github.com/damonto/vowifi-go/ims/sip"
 	imsvoice "github.com/damonto/vowifi-go/ims/voice"
+	"github.com/damonto/vowifi-go/usim"
 	usimreader "github.com/damonto/vowifi-go/usim/reader"
 	"github.com/godbus/dbus/v5"
 
@@ -35,13 +37,16 @@ type Config struct {
 
 type coordinator struct {
 	settings   *SettingsStore
+	store      *storage.Store
 	onIncoming IncomingSMSFunc
 	websheets  *websheet.Broker
 
-	mu               sync.Mutex
-	sessions         map[string]*sessionState
-	voiceSubscribers map[uint64]VoiceEventFunc
-	nextVoiceSubID   uint64
+	mu                sync.Mutex
+	sessions          map[string]*sessionState
+	smsReports        map[smsReportKey]*smsReportTracker
+	pendingSMSReports map[smsReportKey]pendingSMSReport
+	voiceSubscribers  map[uint64]VoiceEventFunc
+	nextVoiceSubID    uint64
 }
 
 type sessionState struct {
@@ -54,6 +59,7 @@ type sessionState struct {
 	modemPath   dbus.ObjectPath
 	profileID   string
 	connected   bool
+	connectedAt time.Time
 	websheet    *websheet.Session
 }
 
@@ -69,6 +75,28 @@ type pendingVoiceDial struct {
 	startedAt time.Time
 }
 
+type smsReportKey struct {
+	modemID     string
+	profileID   string
+	recipient   string
+	tpReference byte
+}
+
+type smsReportTracker struct {
+	profileID    string
+	externalKey  string
+	segmentCount int
+	statuses     map[byte]string
+	current      string
+	pendingStore string
+	expiresAt    time.Time
+}
+
+type pendingSMSReport struct {
+	status    string
+	expiresAt time.Time
+}
+
 var retryDelays = []time.Duration{
 	30 * time.Second,
 	60 * time.Second,
@@ -82,15 +110,20 @@ const (
 	terminalVendor          = "Google"
 	terminalModel           = "Pixel 8 Pro"
 	terminalSoftwareVersion = "15/AP3A.240905.015"
+
+	smsReportRetention = 6 * time.Hour
 )
 
 func New(cfg Config) Coordinator {
 	return &coordinator{
-		settings:         NewSettingsStore(cfg.Store),
-		onIncoming:       cfg.OnIncoming,
-		websheets:        cfg.Websheets,
-		sessions:         make(map[string]*sessionState),
-		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+		settings:          NewSettingsStore(cfg.Store),
+		store:             cfg.Store,
+		onIncoming:        cfg.OnIncoming,
+		websheets:         cfg.Websheets,
+		sessions:          make(map[string]*sessionState),
+		smsReports:        make(map[smsReportKey]*smsReportTracker),
+		pendingSMSReports: make(map[smsReportKey]pendingSMSReport),
+		voiceSubscribers:  make(map[uint64]VoiceEventFunc),
 	}
 }
 
@@ -153,6 +186,10 @@ func (c *coordinator) Status(ctx context.Context, modem *mmodem.Modem) (Status, 
 	c.mu.Lock()
 	session := c.sessions[modem.EquipmentIdentifier]
 	connected := session != nil && session.connected && session.profileID == profileID
+	durationSeconds := int64(0)
+	if connected && !session.connectedAt.IsZero() {
+		durationSeconds = max(0, int64(time.Since(session.connectedAt).Seconds()))
+	}
 	state := StateIdle
 	var pending *websheet.Info
 	switch {
@@ -168,7 +205,13 @@ func (c *coordinator) Status(ctx context.Context, modem *mmodem.Modem) (Status, 
 		state = StateDisconnected
 	}
 	c.mu.Unlock()
-	return Status{Settings: settings, Connected: connected, State: state, Websheet: pending}, nil
+	return Status{
+		Settings:        settings,
+		Connected:       connected,
+		State:           state,
+		DurationSeconds: durationSeconds,
+		Websheet:        pending,
+	}, nil
 }
 
 func (c *coordinator) StartWebsheet(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
@@ -187,6 +230,54 @@ func (c *coordinator) StartWebsheet(ctx context.Context, modem *mmodem.Modem) (w
 	return info, nil
 }
 
+func (c *coordinator) StartEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
+	if c.websheets == nil {
+		return websheet.Info{}, ErrUnavailable
+	}
+	result, err := c.checkEmergencyAddressUpdate(ctx, modem)
+	if err != nil {
+		return websheet.Info{}, fmt.Errorf("check Wi-Fi Calling E911 entitlement: %w", err)
+	}
+	return c.createWFCWebsheet(ctx, result)
+}
+
+func (c *coordinator) EmergencyAddressUpdateAvailable(ctx context.Context, modem *mmodem.Modem) bool {
+	result, err := c.checkEmergencyAddressUpdate(ctx, modem)
+	if err != nil {
+		slog.Debug("check Wi-Fi Calling E911 update availability", "error", err)
+		return false
+	}
+	return result.Action == vowifi.WFCEntitlementActionOpenWebsheet && result.Websheet != nil
+}
+
+func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (vowifi.WFCEntitlementResult, error) {
+	reader, err := openReader(ctx, modem)
+	if err != nil {
+		return vowifi.WFCEntitlementResult{}, fmt.Errorf("open Wi-Fi Calling SIM reader: %w", err)
+	}
+	cfg, err := modemClientConfig(ctx, modem)
+	if err != nil {
+		err = errors.Join(err, reader.Close())
+		return vowifi.WFCEntitlementResult{}, err
+	}
+	client, err := vowifi.New(reader, cfg)
+	if err != nil {
+		_ = reader.Close()
+		return vowifi.WFCEntitlementResult{}, err
+	}
+	defer func() {
+		_ = client.Close()
+	}()
+	card, err := usim.Load(ctx, reader, slog.Default())
+	if err != nil {
+		return vowifi.WFCEntitlementResult{}, fmt.Errorf("load Wi-Fi Calling SIM: %w", err)
+	}
+	return client.CheckWFCE911Update(ctx, vowifi.WFCEntitlementRequest{
+		Config: cfg,
+		Card:   card,
+	})
+}
+
 func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to string, text string) (storage.Message, error) {
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
@@ -196,15 +287,19 @@ func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to strin
 	if err != nil {
 		return storage.Message{}, err
 	}
+	externalKey, err := newOutgoingMessageKey()
+	if err != nil {
+		return storage.Message{}, err
+	}
 	submission, err := client.SMS().Send(ctx, to, text)
 	if err != nil {
 		return storage.Message{}, err
 	}
-	return storage.Message{
+	msg := storage.Message{
 		ModemID:     modem.EquipmentIdentifier,
 		ProfileID:   profileID,
 		Source:      storage.MessageSourceWiFiCalling,
-		ExternalKey: submission.ID,
+		ExternalKey: externalKey,
 		Sender:      modem.Number,
 		Recipient:   strings.TrimSpace(to),
 		Text:        text,
@@ -212,7 +307,34 @@ func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to strin
 		Status:      "sent",
 		Incoming:    false,
 		WiFiCalling: true,
-	}, nil
+	}
+	if status := c.trackOutgoingSMSReport(msg, submission); status != "" {
+		msg.Status = status
+	}
+	return msg, nil
+}
+
+func (c *coordinator) ApplyPendingSMSStatus(ctx context.Context, msg storage.Message) error {
+	if c.store == nil || msg.Source != storage.MessageSourceWiFiCalling {
+		return nil
+	}
+	update, ok := c.pendingSMSStatus(msg)
+	if !ok {
+		return nil
+	}
+	updated, err := c.store.UpdateMessageStatus(ctx, storage.MessageStatusUpdate{
+		ProfileID:   update.profileID,
+		Source:      storage.MessageSourceWiFiCalling,
+		ExternalKey: update.externalKey,
+		Status:      update.status,
+	})
+	if err != nil {
+		return err
+	}
+	if updated {
+		c.completeStoredSMSStatus(update)
+	}
+	return nil
 }
 
 func (c *coordinator) ExecuteUSSD(ctx context.Context, modem *mmodem.Modem, action string, code string) (string, error) {
@@ -269,6 +391,9 @@ func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to stri
 		if errors.Is(err, ErrNotConnected) {
 			return VoiceCall{}, err
 		}
+		if info, ok := c.finishFailedPendingVoiceDial(modem.EquipmentIdentifier, pending, err); ok {
+			return info, err
+		}
 		return failedOutgoingVoiceCall(modem.EquipmentIdentifier, profileID, to, err), err
 	}
 	info := c.storeVoiceCall(modem.EquipmentIdentifier, profileID, call, strings.TrimSpace(to), string(call.Direction()), string(call.State()), "")
@@ -318,6 +443,54 @@ func failedOutgoingVoiceCallAt(modemID string, profileID string, to string, err 
 func failedVoiceCallID(modemID string, profileID string, number string, at time.Time) string {
 	sum := sha256.Sum256([]byte(modemID + "\x00" + profileID + "\x00" + number + "\x00" + at.UTC().Format(time.RFC3339Nano)))
 	return "failed:" + hex.EncodeToString(sum[:12])
+}
+
+func (c *coordinator) finishFailedPendingVoiceDial(modemID string, pending pendingVoiceDial, err error) (VoiceCall, bool) {
+	reason := ""
+	if err != nil {
+		reason = err.Error()
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	session := c.sessions[modemID]
+	if session == nil || session.calls == nil {
+		return VoiceCall{}, false
+	}
+	for _, state := range session.calls {
+		if state == nil || !samePendingVoiceDial(state.info, pending) {
+			continue
+		}
+		info := state.info
+		if !isTerminalVoiceCallState(info.State) {
+			now := time.Now()
+			info.State = string(imsvoice.CallStateFailed)
+			info.EndedAt = now
+			info.UpdatedAt = now
+		}
+		if strings.TrimSpace(info.Reason) == "" {
+			info.Reason = reason
+		}
+		state.info = info
+		state.updatedAt = info.UpdatedAt
+		if session.pendingDial != nil && *session.pendingDial == pending {
+			session.pendingDial = nil
+		}
+		return info, true
+	}
+	if session.pendingDial != nil && *session.pendingDial == pending {
+		session.pendingDial = nil
+	}
+	return VoiceCall{}, false
+}
+
+func samePendingVoiceDial(call VoiceCall, pending pendingVoiceDial) bool {
+	return call.ID != "" &&
+		call.ProfileID == pending.profileID &&
+		call.Direction == string(imsvoice.CallDirectionOutgoing) &&
+		call.Number == pending.number &&
+		call.StartedAt.Equal(pending.startedAt)
 }
 
 func browserVoiceMediaOffer() imsvoice.MediaOffer {
@@ -685,15 +858,33 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 }
 
 func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, profileID string) {
-	for attempt := 0; ; attempt++ {
-		client, err := c.connectOnce(ctx, modem)
-		if err == nil {
-			c.markConnected(modem.EquipmentIdentifier, client)
-			c.watchClient(ctx, modem, profileID, client)
+	for {
+		client, err := c.connectWithRetry(ctx, modem)
+		if err != nil {
 			return
 		}
+		c.markConnected(modem.EquipmentIdentifier, client)
+		c.watchClient(ctx, modem, profileID, client)
 		if ctx.Err() != nil {
 			return
+		}
+		delay := retryDelays[0]
+		slog.Warn("Wi-Fi Calling disconnected", "modem", modem.EquipmentIdentifier, "retryIn", delay)
+		if err := sleep(ctx, delay); err != nil {
+			return
+		}
+	}
+}
+
+func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem) (*vowifi.Client, error) {
+	attempt := 0
+	for {
+		client, err := c.connectOnce(ctx, modem)
+		if err == nil {
+			return client, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 		if errors.Is(err, vowifi.ErrWFCEntitlementUserActionRequired) {
 			slog.Warn("Wi-Fi Calling requires carrier websheet", "modem", modem.EquipmentIdentifier, "error", err)
@@ -702,19 +893,20 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 					slog.Info("Wi-Fi Calling carrier websheet dismissed", "modem", modem.EquipmentIdentifier)
 					c.stopAsync(modem.EquipmentIdentifier)
 				}
-				return
+				return nil, err
 			}
-			attempt = -1
+			attempt = 0
 			continue
 		}
 		if attempt >= len(retryDelays) {
 			slog.Warn("Wi-Fi Calling connection attempts exhausted", "modem", modem.EquipmentIdentifier, "error", err)
-			return
+			return nil, err
 		}
 		delay := retryDelays[attempt]
+		attempt++
 		slog.Warn("Wi-Fi Calling connect", "modem", modem.EquipmentIdentifier, "retryIn", delay, "error", err)
 		if err := sleep(ctx, delay); err != nil {
-			return
+			return nil, err
 		}
 	}
 }
@@ -724,17 +916,11 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem) (*vo
 	if err != nil {
 		return nil, err
 	}
-	imei, err := modem.ThreeGPP().IMEI(ctx)
+	cfg, err := modemClientConfig(ctx, modem)
 	if err != nil {
-		return nil, fmt.Errorf("read modem IMEI: %w", err)
+		return nil, errors.Join(err, reader.Close())
 	}
-	client, err := vowifi.New(reader, &vowifi.Config{
-		Logger:   slog.Default(),
-		Terminal: terminalInfo(imei),
-		IMS: vowifi.IMSConfig{
-			Voice: browserVoiceConfig(),
-		},
-	})
+	client, err := vowifi.New(reader, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -753,6 +939,20 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem) (*vo
 	return client, nil
 }
 
+func modemClientConfig(ctx context.Context, modem *mmodem.Modem) (*vowifi.Config, error) {
+	imei, err := modem.ThreeGPP().IMEI(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read modem IMEI: %w", err)
+	}
+	return &vowifi.Config{
+		Logger:   slog.Default(),
+		Terminal: terminalInfo(imei),
+		IMS: vowifi.IMSConfig{
+			Voice: browserVoiceConfig(),
+		},
+	}, nil
+}
+
 func terminalInfo(imei string) vowifi.TerminalInfo {
 	return vowifi.TerminalInfo{
 		ID:              imei,
@@ -766,23 +966,52 @@ func (c *coordinator) wfcWebsheetRequest(err error) (websheet.Request, bool) {
 	if c.websheets == nil || !errors.Is(err, vowifi.ErrWFCEntitlementUserActionRequired) {
 		return websheet.Request{}, false
 	}
-	var nsdsErr *vowifi.NSDSWFCEntitlementError
-	if errors.As(err, &nsdsErr) {
+	var entitlementErr *vowifi.WFCEntitlementError
+	if !errors.As(err, &entitlementErr) {
+		return websheet.Request{}, false
+	}
+	return wfcWebsheetRequestFromResult(entitlementErr.Result)
+}
+
+func (c *coordinator) createWFCWebsheet(ctx context.Context, result vowifi.WFCEntitlementResult) (websheet.Info, error) {
+	switch result.Action {
+	case vowifi.WFCEntitlementActionOpenWebsheet:
+		req, ok := wfcWebsheetRequestFromResult(result)
+		if !ok {
+			return websheet.Info{}, ErrWebsheetUnavailable
+		}
+		session, err := c.websheets.Create(ctx, req)
+		if err != nil {
+			return websheet.Info{}, err
+		}
+		return session.Info(), nil
+	case vowifi.WFCEntitlementActionWait:
+		return websheet.Info{}, ErrEntitlementPending
+	case vowifi.WFCEntitlementActionDenied, vowifi.WFCEntitlementActionDisableWFC:
+		return websheet.Info{}, ErrEntitlementDenied
+	default:
+		return websheet.Info{}, ErrWebsheetUnavailable
+	}
+}
+
+func wfcWebsheetRequestFromResult(result vowifi.WFCEntitlementResult) (websheet.Request, bool) {
+	sheet := result.Websheet
+	if sheet == nil || strings.TrimSpace(sheet.URL) == "" {
+		return websheet.Request{}, false
+	}
+	title := firstNonEmpty(sheet.Title, result.Carrier, "Wi-Fi Calling")
+	if result.Scheme == vowifi.WFCEntitlementSchemeNSDS {
 		return websheet.Request{
-			URL:         strings.TrimSpace(nsdsErr.Websheet.URL),
-			UserData:    wfcUserActionData(nsdsErr.Websheet.Data),
+			URL:         strings.TrimSpace(sheet.URL),
+			UserData:    wfcUserActionData(sheet.Data),
 			ContentType: "application/x-www-form-urlencoded",
-			Title:       firstNonEmpty(nsdsErr.Websheet.Title, "Wi-Fi Calling"),
+			Title:       title,
 		}, true
 	}
-	var ts43Err *vowifi.WFCEntitlementError
-	if errors.As(err, &ts43Err) {
-		return websheet.Request{
-			URL:   wfcUserActionURL(ts43Err.Status.ServiceFlowURL, ts43Err.Status.ServiceFlowUserData),
-			Title: firstNonEmpty(ts43Err.Config.CarrierName, "Wi-Fi Calling"),
-		}, true
-	}
-	return websheet.Request{}, false
+	return websheet.Request{
+		URL:   wfcUserActionURL(sheet.URL, sheet.Data),
+		Title: title,
+	}, true
 }
 
 func firstNonEmpty(values ...string) string {
@@ -893,6 +1122,12 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 				return
 			}
 			c.forwardIncoming(ctx, modem, profileID, msg)
+		case report, ok := <-smsEvents.Reports:
+			if !ok {
+				c.markDisconnected(modem.EquipmentIdentifier, client)
+				return
+			}
+			c.forwardSMSReport(ctx, modem.EquipmentIdentifier, profileID, report)
 		case incoming, ok := <-voiceEvents.Incoming:
 			if !ok {
 				c.markDisconnected(modem.EquipmentIdentifier, client)
@@ -920,6 +1155,235 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 			c.markDisconnected(modem.EquipmentIdentifier, client)
 			return
 		}
+	}
+}
+
+func (c *coordinator) trackOutgoingSMSReport(msg storage.Message, submission vowifi.SMSSubmission) string {
+	if len(submission.Segments) == 0 {
+		return ""
+	}
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.ensureSMSReportMaps()
+	c.cleanupSMSReportsLocked(now)
+
+	tracker := &smsReportTracker{
+		profileID:    msg.ProfileID,
+		externalKey:  msg.ExternalKey,
+		segmentCount: len(submission.Segments),
+		statuses:     make(map[byte]string, len(submission.Segments)),
+		expiresAt:    now.Add(smsReportRetention),
+	}
+	for _, segment := range submission.Segments {
+		key := outgoingSMSReportKey(msg.ModemID, msg.ProfileID, msg.Recipient, segment.TPReference)
+		tracker.statuses[segment.TPReference] = ""
+		c.smsReports[key] = tracker
+		if pending, ok := c.pendingSMSReports[key]; ok {
+			tracker.statuses[segment.TPReference] = pending.status
+			delete(c.pendingSMSReports, key)
+		}
+	}
+	tracker.current = tracker.aggregateStatus()
+	if smsStatusFinal(tracker.current) {
+		c.removeSMSReportTrackerLocked(tracker)
+	}
+	return tracker.current
+}
+
+func (c *coordinator) forwardSMSReport(ctx context.Context, modemID string, profileID string, report vowifi.SMSReport) {
+	status := smsReportStatus(report)
+	if status == "" {
+		return
+	}
+	update, ok := c.recordSMSReport(modemID, profileID, report, status)
+	if !ok || c.store == nil {
+		return
+	}
+	if updated, err := c.store.UpdateMessageStatus(ctx, storage.MessageStatusUpdate{
+		ProfileID:   update.profileID,
+		Source:      storage.MessageSourceWiFiCalling,
+		ExternalKey: update.externalKey,
+		Status:      update.status,
+	}); err != nil {
+		slog.Warn("update Wi-Fi Calling SMS status", "modem", modemID, "recipient", report.Recipient, "status", update.status, "error", err)
+	} else if !updated {
+		c.deferStoredSMSStatus(update)
+		slog.Debug("Wi-Fi Calling SMS status target not yet stored", "modem", modemID, "recipient", report.Recipient, "status", update.status)
+	} else {
+		c.completeStoredSMSStatus(update)
+	}
+}
+
+type smsStatusUpdate struct {
+	profileID   string
+	externalKey string
+	status      string
+}
+
+func (c *coordinator) recordSMSReport(modemID string, profileID string, report vowifi.SMSReport, status string) (smsStatusUpdate, bool) {
+	now := time.Now()
+	key := outgoingSMSReportKey(modemID, profileID, report.Recipient, report.MessageReference)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.ensureSMSReportMaps()
+	c.cleanupSMSReportsLocked(now)
+
+	tracker := c.smsReports[key]
+	if tracker == nil {
+		c.pendingSMSReports[key] = pendingSMSReport{
+			status:    status,
+			expiresAt: now.Add(smsReportRetention),
+		}
+		return smsStatusUpdate{}, false
+	}
+	if _, ok := tracker.statuses[key.tpReference]; !ok {
+		return smsStatusUpdate{}, false
+	}
+	tracker.statuses[key.tpReference] = status
+	aggregate := tracker.aggregateStatus()
+	if aggregate == "" || aggregate == tracker.current {
+		return smsStatusUpdate{}, false
+	}
+	tracker.current = aggregate
+	return smsStatusUpdate{
+		profileID:   tracker.profileID,
+		externalKey: tracker.externalKey,
+		status:      aggregate,
+	}, true
+}
+
+func (c *coordinator) deferStoredSMSStatus(update smsStatusUpdate) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	tracker := c.findSMSReportTrackerLocked(update.profileID, update.externalKey)
+	if tracker != nil {
+		tracker.pendingStore = update.status
+	}
+}
+
+func (c *coordinator) pendingSMSStatus(msg storage.Message) (smsStatusUpdate, bool) {
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.ensureSMSReportMaps()
+	c.cleanupSMSReportsLocked(now)
+
+	tracker := c.findSMSReportTrackerLocked(msg.ProfileID, msg.ExternalKey)
+	if tracker == nil || tracker.pendingStore == "" {
+		return smsStatusUpdate{}, false
+	}
+	return smsStatusUpdate{
+		profileID:   tracker.profileID,
+		externalKey: tracker.externalKey,
+		status:      tracker.pendingStore,
+	}, true
+}
+
+func (c *coordinator) completeStoredSMSStatus(update smsStatusUpdate) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	tracker := c.findSMSReportTrackerLocked(update.profileID, update.externalKey)
+	if tracker == nil {
+		return
+	}
+	tracker.pendingStore = ""
+	if smsStatusFinal(update.status) {
+		c.removeSMSReportTrackerLocked(tracker)
+	}
+}
+
+func (c *coordinator) findSMSReportTrackerLocked(profileID string, externalKey string) *smsReportTracker {
+	profileID = strings.TrimSpace(profileID)
+	externalKey = strings.TrimSpace(externalKey)
+	for _, tracker := range c.smsReports {
+		if tracker.profileID == profileID && tracker.externalKey == externalKey {
+			return tracker
+		}
+	}
+	return nil
+}
+
+func (c *coordinator) removeSMSReportTrackerLocked(target *smsReportTracker) {
+	for key, tracker := range c.smsReports {
+		if tracker == target {
+			delete(c.smsReports, key)
+		}
+	}
+}
+
+func (c *coordinator) ensureSMSReportMaps() {
+	if c.smsReports == nil {
+		c.smsReports = make(map[smsReportKey]*smsReportTracker)
+	}
+	if c.pendingSMSReports == nil {
+		c.pendingSMSReports = make(map[smsReportKey]pendingSMSReport)
+	}
+}
+
+func (c *coordinator) cleanupSMSReportsLocked(now time.Time) {
+	for key, tracker := range c.smsReports {
+		if now.After(tracker.expiresAt) {
+			delete(c.smsReports, key)
+		}
+	}
+	for key, report := range c.pendingSMSReports {
+		if now.After(report.expiresAt) {
+			delete(c.pendingSMSReports, key)
+		}
+	}
+}
+
+func (t *smsReportTracker) aggregateStatus() string {
+	if t == nil || t.segmentCount == 0 {
+		return ""
+	}
+	delivered := 0
+	for _, status := range t.statuses {
+		switch status {
+		case "failed":
+			return "failed"
+		case "retrying":
+			return "retrying"
+		case "delivered":
+			delivered++
+		}
+	}
+	if delivered == t.segmentCount {
+		return "delivered"
+	}
+	return ""
+}
+
+func smsStatusFinal(status string) bool {
+	return status == "delivered" || status == "failed"
+}
+
+func outgoingSMSReportKey(modemID string, profileID string, recipient string, tpReference byte) smsReportKey {
+	return smsReportKey{
+		modemID:     strings.TrimSpace(modemID),
+		profileID:   strings.TrimSpace(profileID),
+		recipient:   strings.TrimSpace(recipient),
+		tpReference: tpReference,
+	}
+}
+
+func smsReportStatus(report vowifi.SMSReport) string {
+	switch status := report.Status; {
+	case status.Delivered():
+		return "delivered"
+	case status.Failed():
+		return "failed"
+	case status.Retrying():
+		return "retrying"
+	default:
+		return ""
 	}
 }
 
@@ -1019,6 +1483,7 @@ func (c *coordinator) markConnected(modemID string, client *vowifi.Client) {
 	if session := c.sessions[modemID]; session != nil {
 		session.client = client
 		session.connected = true
+		session.connectedAt = time.Now()
 	}
 }
 
@@ -1031,6 +1496,7 @@ func (c *coordinator) markDisconnected(modemID string, client *vowifi.Client) {
 	}
 	session.client = nil
 	session.connected = false
+	session.connectedAt = time.Time{}
 	events := disconnectedCallEvents(session)
 	c.mu.Unlock()
 
@@ -1224,6 +1690,14 @@ func incomingMessageKey(msg vowifi.SMS) string {
 		msg.ReceivedAt.UTC().Format(time.RFC3339Nano),
 	}, "\x00")))
 	return "incoming:" + hex.EncodeToString(sum[:])
+}
+
+func newOutgoingMessageKey() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("create outgoing message key: %w", err)
+	}
+	return "outgoing:" + hex.EncodeToString(b[:]), nil
 }
 
 func sleep(ctx context.Context, delay time.Duration) error {

@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 func TestEnablePrepareError(t *testing.T) {
@@ -111,6 +112,41 @@ func TestEnableError(t *testing.T) {
 			}
 			if !strings.Contains(rec.Body.String(), tt.wantBody) {
 				t.Fatalf("body = %s, want it to contain %q", rec.Body.String(), tt.wantBody)
+			}
+		})
+	}
+}
+
+func TestRestoreInternetBeforeProfileEnable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		modem   *mmodem.Modem
+		wantErr bool
+	}{
+		{
+			name: "skip current SIM internet restore while modem is locked",
+			modem: &mmodem.Modem{
+				State: mmodem.ModemStateLocked,
+			},
+		},
+		{
+			name:    "unlocked modem requires internet connector",
+			modem:   &mmodem.Modem{State: mmodem.ModemStateRegistered},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := &Handler{}
+			err := h.restoreInternetBeforeProfileEnable(context.Background(), tt.modem)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("restoreInternetBeforeProfileEnable() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

@@ -80,6 +80,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		h := hmodem.New(deps.Store, deps.Registry, deps.Internet, deps.WiFiCalling)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
+		protected.POST("/modems/:id/sim-unlocks", h.UnlockSIM)
 		protected.PUT("/modems/:id/sim-slots/:identifier", h.SwitchSimSlot)
 		protected.PUT("/modems/:id/msisdn", h.UpdateMSISDN)
 		protected.GET("/modems/:id/settings", h.GetSettings)
@@ -87,6 +88,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		protected.GET("/modems/:id/wifi-calling-settings", h.GetWiFiCallingSettings)
 		protected.PUT("/modems/:id/wifi-calling-settings", h.UpdateWiFiCallingSettings)
 		protected.POST("/modems/:id/wifi-calling-websheets", h.StartWiFiCallingWebsheet)
+		protected.POST("/modems/:id/wifi-calling-emergency-address-websheets", h.StartWiFiCallingEmergencyAddressWebsheet)
 
 		{
 			h := message.New(deps.Registry, deps.Storage, deps.WiFiCalling)
@@ -101,7 +103,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.GET("/modems/:id/calls", h.List)
 			protected.POST("/modems/:id/calls", h.Dial)
 			protected.GET("/modems/:id/calls/events", h.Events)
-			protected.GET("/modems/:id/calls/:callID/media", h.Media)
+			protected.POST("/modems/:id/calls/:callID/webrtc-offer", h.WebRTCOffer)
 			protected.PATCH("/modems/:id/calls/:callID", h.Update)
 			protected.DELETE("/modems/:id/calls/:callID", h.Delete)
 		}

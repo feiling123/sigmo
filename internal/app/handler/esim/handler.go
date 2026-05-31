@@ -138,13 +138,23 @@ func (h *Handler) Enable(c *echo.Context) error {
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), enableTimeout)
 	defer cancel()
-	if err := h.internet.Restore(ctx, modem); err != nil {
+	if err := h.restoreInternetBeforeProfileEnable(ctx, modem); err != nil {
 		return httpapi.Internal(c, errorCodeEnableESIMFailed, err)
 	}
 	if err := session.Enable(ctx); err != nil {
 		return enableError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *Handler) restoreInternetBeforeProfileEnable(ctx context.Context, modem *mmodem.Modem) error {
+	if modem != nil && modem.State == mmodem.ModemStateLocked {
+		return nil
+	}
+	if h.internet == nil {
+		return errors.New("internet connector is required")
+	}
+	return h.internet.Restore(ctx, modem)
 }
 
 func enablePrepareError(c *echo.Context, err error) error {

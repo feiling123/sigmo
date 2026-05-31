@@ -34,8 +34,8 @@ func New(channel *settings.Channel) (*Sender, error) {
 		return nil, errors.New("email recipients are required")
 	}
 
-	tlsPolicy, err := parseTLSPolicy(channel.TLSPolicy)
-	if err != nil {
+	var policy tlsPolicy
+	if err := policy.UnmarshalText([]byte(channel.TLSPolicy)); err != nil {
 		return nil, err
 	}
 
@@ -61,7 +61,7 @@ func New(channel *settings.Channel) (*Sender, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating email client: %w", err)
 	}
-	client.SetTLSPolicy(tlsPolicy)
+	client.SetTLSPolicy(policy.TLSPolicy)
 
 	return &Sender{
 		client:     client,

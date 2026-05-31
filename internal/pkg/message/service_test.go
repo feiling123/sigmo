@@ -95,6 +95,9 @@ func TestSendRoutesMessages(t *testing.T) {
 			if wifiCalling.sendSMSCalls != tt.wantWiFiSends {
 				t.Fatalf("Wi-Fi Calling sends = %d, want %d", wifiCalling.sendSMSCalls, tt.wantWiFiSends)
 			}
+			if wifiCalling.applySMSStatusCalls != tt.wantWiFiSends {
+				t.Fatalf("Wi-Fi Calling status applies = %d, want %d", wifiCalling.applySMSStatusCalls, tt.wantWiFiSends)
+			}
 			if device.sendCalls != tt.wantModemSend {
 				t.Fatalf("modem sends = %d, want %d", device.sendCalls, tt.wantModemSend)
 			}
@@ -219,10 +222,11 @@ func (f *fakeModemDevice) modemID() string { return f.id }
 func (f *fakeModemDevice) phoneNumber() string { return f.number }
 
 type fakeWiFiCalling struct {
-	status       wificalling.Status
-	statusErr    error
-	message      storage.Message
-	sendSMSCalls int
+	status              wificalling.Status
+	statusErr           error
+	message             storage.Message
+	sendSMSCalls        int
+	applySMSStatusCalls int
 }
 
 func (fakeWiFiCalling) Run(context.Context, *mmodem.Registry) error { return nil }
@@ -239,13 +243,26 @@ func (f fakeWiFiCalling) Status(context.Context, *mmodem.Modem) (wificalling.Sta
 	return f.status, f.statusErr
 }
 
+func (fakeWiFiCalling) EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool {
+	return false
+}
+
 func (fakeWiFiCalling) StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error) {
+	return websheet.Info{}, nil
+}
+
+func (fakeWiFiCalling) StartEmergencyAddressUpdate(context.Context, *mmodem.Modem) (websheet.Info, error) {
 	return websheet.Info{}, nil
 }
 
 func (f *fakeWiFiCalling) SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error) {
 	f.sendSMSCalls++
 	return f.message, nil
+}
+
+func (f *fakeWiFiCalling) ApplyPendingSMSStatus(context.Context, storage.Message) error {
+	f.applySMSStatusCalls++
+	return nil
 }
 
 func (fakeWiFiCalling) ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error) {

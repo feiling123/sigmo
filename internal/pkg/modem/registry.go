@@ -155,6 +155,7 @@ func (m *Registry) createModem(ctx context.Context, objectPath dbus.ObjectPath, 
 		FirmwareRevision:    variantString(data, "Revision"),
 		HardwareRevision:    variantString(data, "HardwareRevision"),
 		State:               ModemState(variantInt32(data, "State")),
+		UnlockRequired:      ModemLock(variantUint[uint32](data, "UnlockRequired")),
 		PrimaryPort:         primaryPort,
 		PrimarySimSlot:      variantUint[uint32](data, "PrimarySimSlot"),
 	}
@@ -166,6 +167,7 @@ func (m *Registry) createModem(ctx context.Context, objectPath dbus.ObjectPath, 
 			if ctx.Err() != nil {
 				return nil, fmt.Errorf("read primary SIM: %w", err)
 			}
+			modem.Sim, _ = modem.SIMs().Reference(primarySIMPath)
 			slog.Warn("read primary SIM", "path", primarySIMPath, "modem", modem.EquipmentIdentifier, "error", err)
 		}
 	}

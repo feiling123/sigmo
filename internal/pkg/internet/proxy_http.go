@@ -56,27 +56,40 @@ func (p *Proxy) serveHTTPProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) authenticateHTTP(r *http.Request) (string, bool) {
-	username, password, ok := parseProxyBasicAuth(r.Header.Get("Proxy-Authorization"))
-	if !ok {
+	var auth proxyBasicAuth
+	if err := auth.UnmarshalText([]byte(r.Header.Get("Proxy-Authorization"))); err != nil {
 		return "", false
 	}
-	return username, p.validCredential(username, password)
+	return auth.Username, p.validCredential(auth.Username, auth.Password)
 }
 
-func parseProxyBasicAuth(header string) (string, string, bool) {
-	scheme, value, ok := strings.Cut(strings.TrimSpace(header), " ")
+type proxyBasicAuth struct {
+	Username string
+	Password string
+}
+
+func (a proxyBasicAuth) MarshalText() ([]byte, error) {
+	data := a.Username + ":" + a.Password
+	value := base64.StdEncoding.EncodeToString([]byte(data))
+	return []byte("Basic " + value), nil
+}
+
+func (a *proxyBasicAuth) UnmarshalText(text []byte) error {
+	scheme, value, ok := strings.Cut(strings.TrimSpace(string(text)), " ")
 	if !ok || !strings.EqualFold(scheme, "Basic") {
-		return "", "", false
+		return errors.New("proxy basic authorization is invalid")
 	}
 	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
 	if err != nil {
-		return "", "", false
+		return errors.New("proxy basic authorization is invalid")
 	}
 	username, password, ok := strings.Cut(string(data), ":")
 	if !ok {
-		return "", "", false
+		return errors.New("proxy basic authorization is invalid")
 	}
-	return username, password, true
+	a.Username = username
+	a.Password = password
+	return nil
 }
 
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request, username string) {

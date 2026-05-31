@@ -33,6 +33,13 @@ type Message struct {
 	WiFiCalling bool
 }
 
+type MessageStatusUpdate struct {
+	ProfileID   string
+	Source      string
+	ExternalKey string
+	Status      string
+}
+
 func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 	msg = normalizeMessage(msg)
 	if err := validateMessage(msg); err != nil {
@@ -54,6 +61,29 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("read inserted message count: %w", err)
+	}
+	return affected > 0, nil
+}
+
+func (s *Store) UpdateMessageStatus(ctx context.Context, update MessageStatusUpdate) (bool, error) {
+	update.ProfileID = strings.TrimSpace(update.ProfileID)
+	update.Source = strings.TrimSpace(update.Source)
+	update.ExternalKey = strings.TrimSpace(update.ExternalKey)
+	update.Status = strings.ToLower(strings.TrimSpace(update.Status))
+	if update.ProfileID == "" || update.Source == "" || update.ExternalKey == "" || update.Status == "" {
+		return false, errors.New("message status update requires profile id, source, external key, and status")
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE messages
+		SET status = ?, updated_at = ?
+		WHERE profile_id = ? AND source = ? AND external_key = ?
+	`, update.Status, nowText(), update.ProfileID, update.Source, update.ExternalKey)
+	if err != nil {
+		return false, fmt.Errorf("update message status: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read updated message count: %w", err)
 	}
 	return affected > 0, nil
 }

@@ -54,12 +54,24 @@ func (c *coordinator) Status(ctx context.Context, modem *mmodem.Modem) (Status, 
 	return Status{Settings: settings, State: StateIdle}, nil
 }
 
+func (c *coordinator) EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool {
+	return false
+}
+
 func (c *coordinator) StartWebsheet(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
+	return websheet.Info{}, ErrUnavailable
+}
+
+func (c *coordinator) StartEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
 	return websheet.Info{}, ErrUnavailable
 }
 
 func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to string, text string) (storage.Message, error) {
 	return storage.Message{}, ErrUnavailable
+}
+
+func (c *coordinator) ApplyPendingSMSStatus(context.Context, storage.Message) error {
+	return nil
 }
 
 func (c *coordinator) ExecuteUSSD(ctx context.Context, modem *mmodem.Modem, action string, code string) (string, error) {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -13,8 +14,8 @@ import (
 	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/websheet"
-	"github.com/damonto/ts43-go/ts43"
 	vowifi "github.com/damonto/vowifi-go"
 	imssip "github.com/damonto/vowifi-go/ims/sip"
 	imsvoice "github.com/damonto/vowifi-go/ims/voice"
@@ -53,6 +54,247 @@ func TestIncomingMessageKey(t *testing.T) {
 				t.Fatalf("incomingMessageKey() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNewOutgoingMessageKey(t *testing.T) {
+	first, err := newOutgoingMessageKey()
+	if err != nil {
+		t.Fatalf("newOutgoingMessageKey() first error = %v", err)
+	}
+	second, err := newOutgoingMessageKey()
+	if err != nil {
+		t.Fatalf("newOutgoingMessageKey() second error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{name: "first key", key: first},
+		{name: "second key", key: second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.HasPrefix(tt.key, "outgoing:") {
+				t.Fatalf("key = %q, want outgoing prefix", tt.key)
+			}
+			if len(tt.key) != len("outgoing:")+32 {
+				t.Fatalf("key length = %d, want %d", len(tt.key), len("outgoing:")+32)
+			}
+		})
+	}
+	if first == second {
+		t.Fatalf("newOutgoingMessageKey() returned duplicate keys %q", first)
+	}
+}
+
+func TestSMSReportStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		report vowifi.SMSReport
+		want   string
+	}{
+		{
+			name:   "delivered",
+			report: vowifi.SMSReport{Status: vowifi.SMSReportStatusReceivedBySME},
+			want:   "delivered",
+		},
+		{
+			name:   "retrying",
+			report: vowifi.SMSReport{Status: vowifi.SMSReportStatusRetryingSMEBusy},
+			want:   "retrying",
+		},
+		{
+			name:   "permanent failure",
+			report: vowifi.SMSReport{Status: vowifi.SMSReportStatusPermanentIncompatibleDestination},
+			want:   "failed",
+		},
+		{
+			name:   "temporary failure without retry",
+			report: vowifi.SMSReport{Status: vowifi.SMSReportStatusNoRetryServiceRejected},
+			want:   "failed",
+		},
+		{
+			name:   "completed but not confirmed delivered keeps sent",
+			report: vowifi.SMSReport{Status: vowifi.SMSReportStatusForwardedUnconfirmed},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := smsReportStatus(tt.report); got != tt.want {
+				t.Fatalf("smsReportStatus() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSMSReportTrackingAggregatesSegments(t *testing.T) {
+	tests := []struct {
+		name            string
+		submission      vowifi.SMSSubmission
+		reports         []vowifi.SMSReport
+		wantUpdates     []string
+		wantTrackStatus string
+	}{
+		{
+			name: "single segment delivered",
+			submission: vowifi.SMSSubmission{Segments: []vowifi.SMSSubmissionSegment{
+				{TPReference: 7},
+			}},
+			reports: []vowifi.SMSReport{
+				{Recipient: "+200", MessageReference: 7, Status: vowifi.SMSReportStatusReceivedBySME},
+			},
+			wantUpdates: []string{"delivered"},
+		},
+		{
+			name: "multipart waits for all delivered reports",
+			submission: vowifi.SMSSubmission{Segments: []vowifi.SMSSubmissionSegment{
+				{TPReference: 1},
+				{TPReference: 2},
+			}},
+			reports: []vowifi.SMSReport{
+				{Recipient: "+200", MessageReference: 1, Status: vowifi.SMSReportStatusReceivedBySME},
+				{Recipient: "+200", MessageReference: 2, Status: vowifi.SMSReportStatusReceivedBySME},
+			},
+			wantUpdates: []string{"delivered"},
+		},
+		{
+			name: "multipart failed segment wins",
+			submission: vowifi.SMSSubmission{Segments: []vowifi.SMSSubmissionSegment{
+				{TPReference: 1},
+				{TPReference: 2},
+			}},
+			reports: []vowifi.SMSReport{
+				{Recipient: "+200", MessageReference: 1, Status: vowifi.SMSReportStatusReceivedBySME},
+				{Recipient: "+200", MessageReference: 2, Status: vowifi.SMSReportStatusPermanentIncompatibleDestination},
+			},
+			wantUpdates: []string{"failed"},
+		},
+		{
+			name: "partial retrying updates status",
+			submission: vowifi.SMSSubmission{Segments: []vowifi.SMSSubmissionSegment{
+				{TPReference: 1},
+				{TPReference: 2},
+			}},
+			reports: []vowifi.SMSReport{
+				{Recipient: "+200", MessageReference: 1, Status: vowifi.SMSReportStatusRetryingSMEBusy},
+			},
+			wantUpdates: []string{"retrying"},
+		},
+		{
+			name: "missing reports keep sent",
+			submission: vowifi.SMSSubmission{Segments: []vowifi.SMSSubmissionSegment{
+				{TPReference: 1},
+				{TPReference: 2},
+			}},
+			reports: []vowifi.SMSReport{
+				{Recipient: "+200", MessageReference: 1, Status: vowifi.SMSReportStatusReceivedBySME},
+			},
+		},
+		{
+			name: "pending report applies when tracking is registered",
+			submission: vowifi.SMSSubmission{Segments: []vowifi.SMSSubmissionSegment{
+				{TPReference: 9},
+			}},
+			reports: []vowifi.SMSReport{
+				{Recipient: "+200", MessageReference: 9, Status: vowifi.SMSReportStatusReceivedBySME},
+			},
+			wantTrackStatus: "delivered",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &coordinator{}
+			msg := storage.Message{
+				ModemID:     "modem-1",
+				ProfileID:   "profile-a",
+				Source:      storage.MessageSourceWiFiCalling,
+				ExternalKey: "outgoing-1",
+				Recipient:   "+200",
+				Status:      "sent",
+			}
+			if tt.wantTrackStatus != "" {
+				for _, report := range tt.reports {
+					c.recordSMSReport(msg.ModemID, msg.ProfileID, report, smsReportStatus(report))
+				}
+				if got := c.trackOutgoingSMSReport(msg, tt.submission); got != tt.wantTrackStatus {
+					t.Fatalf("trackOutgoingSMSReport() = %q, want %q", got, tt.wantTrackStatus)
+				}
+				return
+			}
+
+			if got := c.trackOutgoingSMSReport(msg, tt.submission); got != "" {
+				t.Fatalf("trackOutgoingSMSReport() = %q, want empty initial status", got)
+			}
+			var updates []string
+			for _, report := range tt.reports {
+				update, ok := c.recordSMSReport(msg.ModemID, msg.ProfileID, report, smsReportStatus(report))
+				if ok {
+					updates = append(updates, update.status)
+				}
+			}
+			if !slices.Equal(updates, tt.wantUpdates) {
+				t.Fatalf("updates = %v, want %v", updates, tt.wantUpdates)
+			}
+		})
+	}
+}
+
+func TestApplyPendingSMSStatusAfterStoreMiss(t *testing.T) {
+	ctx := context.Background()
+	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	c := &coordinator{store: store}
+	msg := storage.Message{
+		ModemID:     "modem-1",
+		ProfileID:   "profile-a",
+		Source:      storage.MessageSourceWiFiCalling,
+		ExternalKey: "outgoing-1",
+		Sender:      "+100",
+		Recipient:   "+200",
+		Text:        "hello",
+		Timestamp:   time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC),
+		Status:      "sent",
+		WiFiCalling: true,
+	}
+	c.trackOutgoingSMSReport(msg, vowifi.SMSSubmission{Segments: []vowifi.SMSSubmissionSegment{
+		{TPReference: 7},
+	}})
+
+	c.forwardSMSReport(ctx, msg.ModemID, msg.ProfileID, vowifi.SMSReport{
+		Recipient:        msg.Recipient,
+		MessageReference: 7,
+		Status:           vowifi.SMSReportStatusReceivedBySME,
+	})
+
+	inserted, err := store.InsertMessage(ctx, msg)
+	if err != nil {
+		t.Fatalf("InsertMessage() error = %v", err)
+	}
+	if !inserted {
+		t.Fatal("InsertMessage() = false, want true")
+	}
+	if err := c.ApplyPendingSMSStatus(ctx, msg); err != nil {
+		t.Fatalf("ApplyPendingSMSStatus() error = %v", err)
+	}
+	messages, err := store.ListByParticipant(ctx, msg.ProfileID, msg.Recipient)
+	if err != nil {
+		t.Fatalf("ListByParticipant() error = %v", err)
+	}
+	if len(messages) != 1 || messages[0].Status != "delivered" {
+		t.Fatalf("messages = %+v, want delivered message", messages)
+	}
+	if len(c.smsReports) != 0 {
+		t.Fatalf("smsReports = %d, want cleaned up after final status", len(c.smsReports))
 	}
 }
 
@@ -391,6 +633,124 @@ func TestForwardCallEventStoresCallPointer(t *testing.T) {
 				t.Fatalf("call pointer = %p, want %p", state.call, tt.event.Call)
 			}
 		})
+	}
+}
+
+func TestFinishFailedPendingVoiceDialReusesEventCall(t *testing.T) {
+	at := time.Date(2026, 5, 28, 1, 24, 0, 0, time.UTC)
+	tests := []struct {
+		name      string
+		event     vowifi.CallEvent
+		err       error
+		wantState string
+		wantCause string
+	}{
+		{
+			name: "failed event before dial returns",
+			event: vowifi.CallEvent{
+				CallID: "sip-call-487",
+				State:  imsvoice.CallStateFailed,
+				Cause:  "Request Terminated",
+				At:     at.Add(time.Second),
+			},
+			err:       errors.New("487 Request Terminated"),
+			wantState: string(imsvoice.CallStateFailed),
+			wantCause: "Request Terminated",
+		},
+		{
+			name: "dialing event before dial failure",
+			event: vowifi.CallEvent{
+				CallID: "sip-call-dialing",
+				State:  imsvoice.CallStateDialing,
+				At:     at.Add(2 * time.Second),
+			},
+			err:       errors.New("487 Request Terminated"),
+			wantState: string(imsvoice.CallStateFailed),
+			wantCause: "487 Request Terminated",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &coordinator{
+				sessions: map[string]*sessionState{
+					"modem-1": {
+						profileID: "profile-1",
+						calls:     make(map[string]*voiceCallState),
+					},
+				},
+				voiceSubscribers: make(map[uint64]VoiceEventFunc),
+			}
+			pending := c.setPendingVoiceDial("modem-1", "profile-1", "+12242255559")
+			pending.startedAt = at
+			c.sessions["modem-1"].pendingDial.startedAt = at
+			c.forwardCallEvent("modem-1", tt.event)
+
+			got, ok := c.finishFailedPendingVoiceDial("modem-1", pending, tt.err)
+
+			if !ok {
+				t.Fatal("finishFailedPendingVoiceDial() ok = false, want true")
+			}
+			if got.ID != tt.event.CallID {
+				t.Fatalf("ID = %q, want event call id %q", got.ID, tt.event.CallID)
+			}
+			if got.State != tt.wantState || got.Reason != tt.wantCause {
+				t.Fatalf("state = %q/%q, want %q/%q", got.State, got.Reason, tt.wantState, tt.wantCause)
+			}
+			if got.EndedAt.IsZero() || got.UpdatedAt.IsZero() {
+				t.Fatalf("times = ended %v updated %v, want terminal timestamps", got.EndedAt, got.UpdatedAt)
+			}
+			if len(c.sessions["modem-1"].calls) != 1 {
+				t.Fatalf("stored calls = %d, want only the event call", len(c.sessions["modem-1"].calls))
+			}
+			if c.sessions["modem-1"].pendingDial != nil {
+				t.Fatalf("pendingDial = %+v, want nil", c.sessions["modem-1"].pendingDial)
+			}
+			c.forwardCallEvent("modem-1", vowifi.CallEvent{
+				CallID: tt.event.CallID + "-late",
+				State:  imsvoice.CallStateFailed,
+				Cause:  "late failed event",
+				At:     at.Add(3 * time.Second),
+			})
+			if len(c.sessions["modem-1"].calls) != 1 {
+				t.Fatalf("stored calls after late event = %d, want only the reused event call", len(c.sessions["modem-1"].calls))
+			}
+		})
+	}
+}
+
+func TestFinishFailedPendingVoiceDialConsumesPendingWithoutEvent(t *testing.T) {
+	at := time.Date(2026, 5, 28, 1, 25, 0, 0, time.UTC)
+	c := &coordinator{
+		sessions: map[string]*sessionState{
+			"modem-1": {
+				profileID: "profile-1",
+				calls:     make(map[string]*voiceCallState),
+			},
+		},
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+	}
+	pending := c.setPendingVoiceDial("modem-1", "profile-1", "+12242255559")
+
+	got, ok := c.finishFailedPendingVoiceDial("modem-1", pending, errors.New("487 Request Terminated"))
+
+	if ok {
+		t.Fatal("finishFailedPendingVoiceDial() ok = true, want false")
+	}
+	if got.ID != "" {
+		t.Fatalf("finishFailedPendingVoiceDial() = %+v, want no event call", got)
+	}
+	if c.sessions["modem-1"].pendingDial != nil {
+		t.Fatalf("pendingDial = %+v, want nil", c.sessions["modem-1"].pendingDial)
+	}
+
+	c.forwardCallEvent("modem-1", vowifi.CallEvent{
+		CallID: "sip-call-487",
+		State:  imsvoice.CallStateFailed,
+		Cause:  "Request Terminated",
+		At:     at,
+	})
+	if len(c.sessions["modem-1"].calls) != 0 {
+		t.Fatalf("stored calls = %d, want no late event call", len(c.sessions["modem-1"].calls))
 	}
 }
 
@@ -795,13 +1155,17 @@ func TestWFCWebsheetRequestFromEntitlementErrors(t *testing.T) {
 	}{
 		{
 			name: "nsds",
-			err: &vowifi.NSDSWFCEntitlementError{
-				Err:     vowifi.ErrWFCEntitlementUserActionRequired,
-				Carrier: "Carrier",
-				Websheet: vowifi.WFCWebsheet{
-					URL:   "https://example.com/nsds",
-					Data:  "token=abc",
-					Title: "Wi-Fi Calling",
+			err: &vowifi.WFCEntitlementError{
+				Err: vowifi.ErrWFCEntitlementUserActionRequired,
+				Result: vowifi.WFCEntitlementResult{
+					Scheme:  vowifi.WFCEntitlementSchemeNSDS,
+					Carrier: "Carrier",
+					Websheet: &vowifi.WFCWebsheet{
+						Kind:  vowifi.WFCWebsheetKindEmergencyAddress,
+						URL:   "https://example.com/nsds",
+						Data:  "token=abc",
+						Title: "Wi-Fi Calling",
+					},
 				},
 			},
 			wantURL:         "https://example.com/nsds",
@@ -811,11 +1175,16 @@ func TestWFCWebsheetRequestFromEntitlementErrors(t *testing.T) {
 		{
 			name: "ts43",
 			err: &vowifi.WFCEntitlementError{
-				Err:    vowifi.ErrWFCEntitlementUserActionRequired,
-				Config: ts43.WFCConfig{CarrierName: "Carrier"},
-				Status: ts43.WFCStatus{
-					ServiceFlowURL:      "https://example.com/ts43?existing=1",
-					ServiceFlowUserData: "token=abc",
+				Err: vowifi.ErrWFCEntitlementUserActionRequired,
+				Result: vowifi.WFCEntitlementResult{
+					Scheme:  vowifi.WFCEntitlementSchemeTS43,
+					Carrier: "Carrier",
+					Websheet: &vowifi.WFCWebsheet{
+						Kind:  vowifi.WFCWebsheetKindEmergencyAddress,
+						URL:   "https://example.com/ts43?existing=1",
+						Data:  "token=abc",
+						Title: "Wi-Fi Calling",
+					},
 				},
 			},
 			wantURL: "https://example.com/ts43?existing=1&token=abc",
@@ -837,6 +1206,72 @@ func TestWFCWebsheetRequestFromEntitlementErrors(t *testing.T) {
 			}
 			if req.ContentType != tt.wantContentType {
 				t.Fatalf("ContentType = %q, want %q", req.ContentType, tt.wantContentType)
+			}
+		})
+	}
+}
+
+func TestCreateWFCWebsheetFromEntitlementResult(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     vowifi.WFCEntitlementResult
+		wantMethod string
+		wantErr    error
+	}{
+		{
+			name: "opens emergency address websheet",
+			result: vowifi.WFCEntitlementResult{
+				Scheme:  vowifi.WFCEntitlementSchemeNSDS,
+				Carrier: "Carrier",
+				Action:  vowifi.WFCEntitlementActionOpenWebsheet,
+				Websheet: &vowifi.WFCWebsheet{
+					Kind:  vowifi.WFCWebsheetKindEmergencyAddress,
+					URL:   "http://127.0.0.1/e911",
+					Data:  "token=abc",
+					Title: "E911",
+				},
+			},
+			wantMethod: "POST",
+		},
+		{
+			name: "pending",
+			result: vowifi.WFCEntitlementResult{
+				Action:  vowifi.WFCEntitlementActionWait,
+				Pending: true,
+			},
+			wantErr: ErrEntitlementPending,
+		},
+		{
+			name: "denied",
+			result: vowifi.WFCEntitlementResult{
+				Action: vowifi.WFCEntitlementActionDenied,
+			},
+			wantErr: ErrEntitlementDenied,
+		},
+		{
+			name: "missing websheet",
+			result: vowifi.WFCEntitlementResult{
+				Action: vowifi.WFCEntitlementActionOpenWebsheet,
+			},
+			wantErr: ErrWebsheetUnavailable,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &coordinator{websheets: websheet.New(websheet.Config{AllowPrivateHosts: true})}
+			info, err := c.createWFCWebsheet(context.Background(), tt.result)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("createWFCWebsheet() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("createWFCWebsheet() error = %v", err)
+			}
+			if info.Method != tt.wantMethod {
+				t.Fatalf("Method = %q, want %q", info.Method, tt.wantMethod)
 			}
 		})
 	}

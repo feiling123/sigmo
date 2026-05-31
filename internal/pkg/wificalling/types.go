@@ -30,11 +30,14 @@ const (
 )
 
 var (
-	ErrUnavailable        = errors.New("wifi calling is unavailable")
-	ErrNotConnected       = errors.New("wifi calling is not connected")
-	ErrUnsupportedCodec   = errors.New("wifi calling voice codec is not supported")
-	ErrWebsheetNotPending = errors.New("wifi calling websheet is not pending")
-	ErrWebsheetDismissed  = errors.New("wifi calling websheet was dismissed")
+	ErrUnavailable         = errors.New("wifi calling is unavailable")
+	ErrNotConnected        = errors.New("wifi calling is not connected")
+	ErrEntitlementPending  = errors.New("wifi calling entitlement is pending")
+	ErrEntitlementDenied   = errors.New("wifi calling entitlement denied")
+	ErrUnsupportedCodec    = errors.New("wifi calling voice codec is not supported")
+	ErrWebsheetNotPending  = errors.New("wifi calling websheet is not pending")
+	ErrWebsheetDismissed   = errors.New("wifi calling websheet was dismissed")
+	ErrWebsheetUnavailable = errors.New("wifi calling websheet is unavailable")
 )
 
 type Settings struct {
@@ -44,9 +47,10 @@ type Settings struct {
 
 type Status struct {
 	Settings
-	Connected bool
-	State     string
-	Websheet  *websheet.Info
+	Connected       bool
+	State           string
+	DurationSeconds int64
+	Websheet        *websheet.Info
 }
 
 type IncomingSMS struct {
@@ -98,8 +102,11 @@ type Coordinator interface {
 	Settings(context.Context, *mmodem.Modem) (Settings, error)
 	UpdateSettings(context.Context, *mmodem.Modem, Settings) error
 	Status(context.Context, *mmodem.Modem) (Status, error)
+	EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool
 	StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error)
+	StartEmergencyAddressUpdate(context.Context, *mmodem.Modem) (websheet.Info, error)
 	SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error)
+	ApplyPendingSMSStatus(context.Context, storage.Message) error
 	ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error)
 	DialCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
 	AnswerCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)

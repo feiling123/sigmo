@@ -57,6 +57,10 @@ func (c *catalog) Get(ctx context.Context, modem *mmodem.Modem) (*ModemResponse,
 }
 
 func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*ModemResponse, error) {
+	if device.State == mmodem.ModemStateLocked {
+		return c.buildLockedResponse(device)
+	}
+
 	sim, err := device.SIMs().Primary(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch primary SIM: %w", err)
@@ -119,6 +123,9 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		HardwareRevision: device.HardwareRevision,
 		Name:             name,
 		Number:           device.Number,
+		State:            modemStateValue(device.State),
+		UnlockRequired:   device.UnlockRequired.String(),
+		UnlockSupported:  unlockSupported(device),
 		SIM: SlotResponse{
 			Active:             sim.Active,
 			OperatorName:       simOperatorName,
@@ -139,6 +146,68 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		WiFiCallingPreferred: wifiStatus.Preferred,
 		WiFiCallingConnected: wifiStatus.Connected,
 	}, nil
+}
+
+func (c *catalog) buildLockedResponse(device *mmodem.Modem) (*ModemResponse, error) {
+	alias := c.store.FindModem(device.EquipmentIdentifier).Alias
+	name := device.Model
+	if alias != "" {
+		name = alias
+	}
+	supportsEsim, err := supportsEsim(device, c.store)
+	if err != nil && !errors.Is(err, lpa.ErrNoSupportedAID) {
+		slog.Warn("detect eSIM support for locked modem", "modem", device.EquipmentIdentifier, "error", err)
+	}
+	return &ModemResponse{
+		Manufacturer:     device.Manufacturer,
+		ID:               device.EquipmentIdentifier,
+		FirmwareRevision: device.FirmwareRevision,
+		HardwareRevision: device.HardwareRevision,
+		Name:             name,
+		Number:           device.Number,
+		State:            modemStateValue(device.State),
+		UnlockRequired:   device.UnlockRequired.String(),
+		UnlockSupported:  unlockSupported(device),
+		SupportsEsim:     supportsEsim,
+		Slots:            []SlotResponse{},
+	}, nil
+}
+
+func modemStateValue(state mmodem.ModemState) string {
+	switch state {
+	case mmodem.ModemStateFailed:
+		return "failed"
+	case mmodem.ModemStateUnknown:
+		return "unknown"
+	case mmodem.ModemStateInitializing:
+		return "initializing"
+	case mmodem.ModemStateLocked:
+		return "locked"
+	case mmodem.ModemStateDisabled:
+		return "disabled"
+	case mmodem.ModemStateDisabling:
+		return "disabling"
+	case mmodem.ModemStateEnabling:
+		return "enabling"
+	case mmodem.ModemStateEnabled:
+		return "enabled"
+	case mmodem.ModemStateSearching:
+		return "searching"
+	case mmodem.ModemStateRegistered:
+		return "registered"
+	case mmodem.ModemStateDisconnecting:
+		return "disconnecting"
+	case mmodem.ModemStateConnecting:
+		return "connecting"
+	case mmodem.ModemStateConnected:
+		return "connected"
+	default:
+		return "unknown"
+	}
+}
+
+func unlockSupported(device *mmodem.Modem) bool {
+	return device.State == mmodem.ModemStateLocked && device.UnlockRequired == mmodem.ModemLockSimPin
 }
 
 func (c *catalog) buildSlotsResponse(ctx context.Context, device *mmodem.Modem) ([]SlotResponse, error) {

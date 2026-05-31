@@ -108,7 +108,7 @@ func (h *Handler) enableTransferProfile(ctx context.Context, modem *mmodem.Modem
 	defer session.Close()
 	sessionCtx, cancel := context.WithTimeout(ctx, enableTimeout)
 	defer cancel()
-	if err := h.internet.Restore(sessionCtx, modem); err != nil {
+	if err := h.restoreInternetBeforeProfileEnable(sessionCtx, modem); err != nil {
 		return fmt.Errorf("restore internet connection: %w", err)
 	}
 	return session.Enable(sessionCtx)

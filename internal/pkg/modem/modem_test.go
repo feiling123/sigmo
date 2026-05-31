@@ -240,6 +240,124 @@ func TestModemDeleteBearer(t *testing.T) {
 	}
 }
 
+func TestSIMSendPin(t *testing.T) {
+	object := &fakeBusObject{path: "/org/freedesktop/ModemManager1/SIM/1"}
+	sim := &SIM{
+		dbusObject: object,
+		Path:       object.path,
+	}
+
+	if err := sim.SendPin(context.Background(), "1234"); err != nil {
+		t.Fatalf("SendPin() error = %v", err)
+	}
+	if got, want := object.calls, []string{ModemSimInterface + ".SendPin"}; !slices.Equal(got, want) {
+		t.Fatalf("calls = %#v, want %#v", got, want)
+	}
+	if len(object.args) != 1 || len(object.args[0]) != 1 || object.args[0][0] != "1234" {
+		t.Fatalf("args = %#v, want PIN", object.args)
+	}
+}
+
+func TestModemUnlockSIMPinAndEnable(t *testing.T) {
+	tests := []struct {
+		name        string
+		pin         string
+		state       ModemState
+		lock        ModemLock
+		simErr      error
+		enableErr   error
+		wantErr     error
+		wantSendPin bool
+		wantEnable  bool
+	}{
+		{
+			name:        "locked sim pin sends pin and enables modem",
+			pin:         " 1234 ",
+			state:       ModemStateLocked,
+			lock:        ModemLockSimPin,
+			wantSendPin: true,
+			wantEnable:  true,
+		},
+		{
+			name:    "rejects empty pin",
+			pin:     " ",
+			state:   ModemStateLocked,
+			lock:    ModemLockSimPin,
+			wantErr: ErrSIMPinRequired,
+		},
+		{
+			name:    "rejects modem that is not locked",
+			pin:     "1234",
+			state:   ModemStateDisabled,
+			lock:    ModemLockNone,
+			wantErr: ErrSIMUnlockNotRequired,
+		},
+		{
+			name:    "rejects unsupported lock",
+			pin:     "1234",
+			state:   ModemStateLocked,
+			lock:    ModemLockSimPuk,
+			wantErr: ErrSIMUnlockUnsupportedLock,
+		},
+		{
+			name:        "send pin error does not enable modem",
+			pin:         "1234",
+			state:       ModemStateLocked,
+			lock:        ModemLockSimPin,
+			simErr:      errors.New("bad pin"),
+			wantErr:     ErrSIMUnlockFailed,
+			wantSendPin: true,
+		},
+		{
+			name:        "enable error is reported separately",
+			pin:         "1234",
+			state:       ModemStateLocked,
+			lock:        ModemLockSimPin,
+			enableErr:   errors.New("permission denied"),
+			wantErr:     ErrEnableAfterSIMUnlock,
+			wantSendPin: true,
+			wantEnable:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			modemObject := &fakeBusObject{
+				path: "/org/freedesktop/ModemManager1/Modem/1",
+				errors: map[string][]error{
+					ModemInterface + ".Enable": {tt.enableErr},
+				},
+			}
+			simObject := &fakeBusObject{
+				path: "/org/freedesktop/ModemManager1/SIM/1",
+				errors: map[string][]error{
+					ModemSimInterface + ".SendPin": {tt.simErr},
+				},
+			}
+			modem := &Modem{
+				dbusObject:     modemObject,
+				State:          tt.state,
+				UnlockRequired: tt.lock,
+				Sim: &SIM{
+					dbusObject: simObject,
+					Path:       simObject.path,
+				},
+			}
+
+			err := modem.UnlockSIMPinAndEnable(context.Background(), tt.pin)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("UnlockSIMPinAndEnable() error = %v, want %v", err, tt.wantErr)
+			}
+			if got := slices.Contains(simObject.calls, ModemSimInterface+".SendPin"); got != tt.wantSendPin {
+				t.Fatalf("SendPin called = %v, want %v", got, tt.wantSendPin)
+			}
+			if got := slices.Contains(modemObject.calls, ModemInterface+".Enable"); got != tt.wantEnable {
+				t.Fatalf("Enable called = %v, want %v", got, tt.wantEnable)
+			}
+		})
+	}
+}
+
 func TestBearerDBusProperties(t *testing.T) {
 	properties, err := bearerDBusProperties(BearerProperties{
 		APN:         " wap.vodafone.co.uk ",

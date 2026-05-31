@@ -136,12 +136,24 @@ func (f fakeWiFiCalling) Status(context.Context, *mmodem.Modem) (wificalling.Sta
 	return f.status, f.statusErr
 }
 
+func (fakeWiFiCalling) EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool {
+	return false
+}
+
 func (fakeWiFiCalling) StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error) {
+	return websheet.Info{}, nil
+}
+
+func (fakeWiFiCalling) StartEmergencyAddressUpdate(context.Context, *mmodem.Modem) (websheet.Info, error) {
 	return websheet.Info{}, nil
 }
 
 func (fakeWiFiCalling) SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error) {
 	return storage.Message{}, nil
+}
+
+func (fakeWiFiCalling) ApplyPendingSMSStatus(context.Context, storage.Message) error {
+	return nil
 }
 
 func (f *fakeWiFiCalling) ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error) {

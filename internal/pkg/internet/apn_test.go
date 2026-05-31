@@ -129,11 +129,11 @@ func TestAndroidAuthType(t *testing.T) {
 		want  string
 	}{
 		{name: "missing", want: ""},
-		{name: "unknown", value: intPtr(-1), want: ""},
-		{name: "none", value: intPtr(0), want: "none"},
-		{name: "pap", value: intPtr(1), want: "pap"},
-		{name: "chap", value: intPtr(2), want: "chap"},
-		{name: "pap chap", value: intPtr(3), want: "pap|chap"},
+		{name: "unknown", value: new(-1), want: ""},
+		{name: "none", value: new(0), want: "none"},
+		{name: "pap", value: new(1), want: "pap"},
+		{name: "chap", value: new(2), want: "chap"},
+		{name: "pap chap", value: new(3), want: "pap|chap"},
 	}
 
 	for _, tt := range tests {
@@ -146,10 +146,6 @@ func TestAndroidAuthType(t *testing.T) {
 			}
 		})
 	}
-}
-
-func intPtr(value int) *int {
-	return &value
 }
 
 func TestSelectAPN(t *testing.T) {
