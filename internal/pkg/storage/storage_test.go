@@ -364,6 +364,7 @@ func TestCallsPersistAndListByModem(t *testing.T) {
 			Direction: "outgoing",
 			Number:    "+12242255559",
 			State:     "dialing",
+			Hold:      "local",
 			StartedAt: base,
 			UpdatedAt: base,
 		},
@@ -423,6 +424,9 @@ func TestCallsPersistAndListByModem(t *testing.T) {
 	if got[0].Route != "modem" || got[1].Route != "wifi_calling" {
 		t.Fatalf("ListCalls() routes = [%s %s], want [modem wifi_calling]", got[0].Route, got[1].Route)
 	}
+	if got[1].Hold != "local" {
+		t.Fatalf("ListCalls() hold = %q, want local", got[1].Hold)
+	}
 
 	calls[0].State = "active"
 	calls[0].AnsweredAt = base.Add(30 * time.Second)
@@ -437,6 +441,9 @@ func TestCallsPersistAndListByModem(t *testing.T) {
 	}
 	if updated.State != "active" || updated.AnsweredAt.IsZero() {
 		t.Fatalf("GetCall() = %+v, want active with answered_at", updated)
+	}
+	if updated.Hold != "local" {
+		t.Fatalf("GetCall() hold = %q, want local", updated.Hold)
 	}
 
 	got, err = store.ListCalls(ctx, "profile-a", "modem-1", 1, "")

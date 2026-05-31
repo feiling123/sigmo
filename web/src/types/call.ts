@@ -11,6 +11,7 @@ export type CallState =
   | 'ending'
   | 'ended'
   | 'failed'
+export type CallHoldState = 'none' | 'local' | 'remote' | 'local_remote'
 
 export type CallRecord = {
   callID: string
@@ -18,6 +19,7 @@ export type CallRecord = {
   direction: CallDirection
   number: string
   state: CallState
+  hold: CallHoldState
   reason: string
   startedAt: string
   answeredAt: string
@@ -31,8 +33,9 @@ export type DialCallRequest = {
 }
 
 export type UpdateCallRequest = {
-  state: 'active' | 'ended'
+  state?: 'active' | 'ended'
   reason?: 'busy' | ''
+  hold?: 'local' | 'none'
 }
 
 export type CallEventMessage = {

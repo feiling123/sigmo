@@ -218,6 +218,13 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     status.value = 'closed'
   }
 
+  const setInputEnabled = (enabled: boolean) => {
+    if (!stream) return
+    for (const track of stream.getAudioTracks()) {
+      track.enabled = enabled
+    }
+  }
+
   if (getCurrentInstance()) {
     onBeforeUnmount(stop)
   }
@@ -231,6 +238,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     prepare,
     start,
     stop,
+    setInputEnabled,
   }
 }
 

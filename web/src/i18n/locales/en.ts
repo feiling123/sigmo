@@ -413,6 +413,8 @@ const en = {
       answer: 'Answer',
       reject: 'Reject',
       hangup: 'Hang up',
+      hold: 'Hold',
+      resume: 'Resume',
       incoming: 'Incoming',
       outgoing: 'Outgoing',
       callBack: 'Call back',
@@ -444,6 +446,11 @@ const en = {
         ending: 'Ending',
         ended: 'Ended',
         failed: 'Failed',
+      },
+      holdStates: {
+        local: 'On hold',
+        remote: 'Remote hold',
+        localRemote: 'Both on hold',
       },
       details: {
         direction: 'Direction',

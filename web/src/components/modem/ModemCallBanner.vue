@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Mic, PhoneCall, PhoneIncoming, PhoneOff } from 'lucide-vue-next'
+import { Mic, Pause, PhoneCall, PhoneIncoming, PhoneOff, Play } from 'lucide-vue-next'
 
 import { Button } from '@/components/ui/button'
 import type { ModemCallSession } from '@/composables/useModemCallSession'
@@ -69,6 +69,9 @@ const props = defineProps<{
         <p class="truncate text-xs text-muted-foreground">
           {{ props.session.stateLabel(props.session.activeCall.value.state) }} ·
           {{ props.session.routeLabel(props.session.activeCall.value.route) }}
+          <template v-if="props.session.holdLabel(props.session.activeCall.value.hold)">
+            · {{ props.session.holdLabel(props.session.activeCall.value.hold) }}
+          </template>
         </p>
         <p
           v-if="props.session.activeCallDurationLabel.value"
@@ -83,6 +86,20 @@ const props = defineProps<{
       </div>
     </div>
     <div class="flex shrink-0 items-center gap-2">
+      <Button
+        v-if="props.session.activeCall.value.route === 'wifi_calling'"
+        size="icon"
+        variant="outline"
+        :aria-label="
+          props.session.isLocallyHeld(props.session.activeCall.value)
+            ? $t('modemDetail.phone.resume')
+            : $t('modemDetail.phone.hold')
+        "
+        @click="props.session.toggleHold(props.session.activeCall.value)"
+      >
+        <Play v-if="props.session.isLocallyHeld(props.session.activeCall.value)" class="size-4" />
+        <Pause v-else class="size-4" />
+      </Button>
       <Button
         size="icon"
         variant="destructive"

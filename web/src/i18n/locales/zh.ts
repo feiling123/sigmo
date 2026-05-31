@@ -411,6 +411,8 @@ const zh = {
       answer: '接听',
       reject: '拒接',
       hangup: '挂断',
+      hold: '保持',
+      resume: '恢复',
       incoming: '呼入',
       outgoing: '呼出',
       callBack: '回拨',
@@ -441,6 +443,11 @@ const zh = {
         ending: '结束中',
         ended: '已结束',
         failed: '失败',
+      },
+      holdStates: {
+        local: '保持中',
+        remote: '对方保持',
+        localRemote: '双方保持',
       },
       details: {
         direction: '方向',

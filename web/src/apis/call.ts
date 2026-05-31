@@ -148,6 +148,14 @@ export const useCallApi = () => {
     return updateCall(id, callID, { state: 'ended' })
   }
 
+  const holdCall = (id: string, callID: string) => {
+    return updateCall(id, callID, { hold: 'local' })
+  }
+
+  const resumeCall = (id: string, callID: string) => {
+    return updateCall(id, callID, { hold: 'none' })
+  }
+
   const createWebRTCAnswer = (
     id: string,
     callID: string,
@@ -174,6 +182,8 @@ export const useCallApi = () => {
     answerCall,
     rejectCall,
     hangupCall,
+    holdCall,
+    resumeCall,
     createWebRTCAnswer,
     deleteCall,
   }

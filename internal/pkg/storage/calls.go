@@ -17,6 +17,7 @@ type Call struct {
 	Direction  string
 	Number     string
 	State      string
+	Hold       string
 	Reason     string
 	StartedAt  time.Time
 	AnsweredAt time.Time
@@ -31,10 +32,10 @@ func (s *Store) SaveCall(ctx context.Context, call Call) error {
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO calls (
-			id, profile_id, modem_id, route, direction, number, state, reason,
+			id, profile_id, modem_id, route, direction, number, state, hold_state, reason,
 			started_at, answered_at, ended_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			profile_id = excluded.profile_id,
 			modem_id = excluded.modem_id,
@@ -42,6 +43,7 @@ func (s *Store) SaveCall(ctx context.Context, call Call) error {
 			direction = excluded.direction,
 			number = excluded.number,
 			state = excluded.state,
+			hold_state = excluded.hold_state,
 			reason = excluded.reason,
 			started_at = excluded.started_at,
 			answered_at = CASE
@@ -50,7 +52,7 @@ func (s *Store) SaveCall(ctx context.Context, call Call) error {
 			END,
 			ended_at = excluded.ended_at,
 			updated_at = excluded.updated_at
-	`, call.ID, call.ProfileID, call.ModemID, call.Route, call.Direction, call.Number, call.State, call.Reason,
+	`, call.ID, call.ProfileID, call.ModemID, call.Route, call.Direction, call.Number, call.State, call.Hold, call.Reason,
 		timeText(call.StartedAt), timeText(call.AnsweredAt), timeText(call.EndedAt), timeText(call.UpdatedAt), timeText(time.Time{}))
 	if err != nil {
 		return fmt.Errorf("save call: %w", err)
@@ -64,7 +66,7 @@ func (s *Store) GetCall(ctx context.Context, id string) (Call, error) {
 		return Call{}, ErrNotFound
 	}
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, profile_id, modem_id, route, direction, number, state, reason,
+		SELECT id, profile_id, modem_id, route, direction, number, state, hold_state, reason,
 			started_at, answered_at, ended_at, updated_at
 		FROM calls
 		WHERE id = ?
@@ -125,7 +127,7 @@ func (s *Store) ListCalls(ctx context.Context, profileID string, modemID string,
 	}
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, profile_id, modem_id, route, direction, number, state, reason,
+		SELECT id, profile_id, modem_id, route, direction, number, state, hold_state, reason,
 			started_at, answered_at, ended_at, updated_at
 		FROM calls
 		WHERE profile_id = ? AND modem_id = ?`+searchSQL+`
@@ -159,7 +161,11 @@ func normalizeCall(call Call) Call {
 	call.Direction = strings.TrimSpace(call.Direction)
 	call.Number = strings.TrimSpace(call.Number)
 	call.State = strings.TrimSpace(call.State)
+	call.Hold = strings.TrimSpace(call.Hold)
 	call.Reason = strings.TrimSpace(call.Reason)
+	if call.Hold == "" {
+		call.Hold = "none"
+	}
 	if call.StartedAt.IsZero() {
 		call.StartedAt = time.Now()
 	}
@@ -206,6 +212,7 @@ func scanCall(row callScanner) (Call, error) {
 		&call.Direction,
 		&call.Number,
 		&call.State,
+		&call.Hold,
 		&call.Reason,
 		&startedAt,
 		&answeredAt,

@@ -64,7 +64,8 @@ class FakePeerConnection {
   }
 }
 
-const fakeTrack = (stop = vi.fn()) => ({ stop }) as unknown as MediaStreamTrack
+const fakeTrack = (stop = vi.fn()) =>
+  ({ enabled: true, stop }) as unknown as MediaStreamTrack & { enabled: boolean }
 
 const fakeStream = (tracks: MediaStreamTrack[]) =>
   ({
@@ -144,6 +145,23 @@ describe('call audio session', () => {
       sdp: 'answer-sdp',
     })
     expect(session.status.value).toBe('ready')
+  })
+
+  it('toggles captured microphone tracks for call hold', async () => {
+    const track = fakeTrack()
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia: vi.fn(async () => fakeStream([track])),
+        createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+      },
+    })
+
+    await expect(session.prepare()).resolves.toBe(true)
+    session.setInputEnabled(false)
+    expect(track.enabled).toBe(false)
+
+    session.setInputEnabled(true)
+    expect(track.enabled).toBe(true)
   })
 
   it('reuses pending microphone preparation when a call starts', async () => {

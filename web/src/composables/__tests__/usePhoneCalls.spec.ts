@@ -11,6 +11,8 @@ const api = vi.hoisted(() => ({
   answerCall: vi.fn(),
   rejectCall: vi.fn(),
   hangupCall: vi.fn(),
+  holdCall: vi.fn(),
+  resumeCall: vi.fn(),
   deleteCall: vi.fn(),
 }))
 
@@ -106,6 +108,7 @@ const call = (patch: Partial<CallRecord> = {}): CallRecord => ({
   direction: 'incoming',
   number: '+12242255559',
   state: 'ringing',
+  hold: 'none',
   reason: '',
   startedAt: '2026-05-27T00:00:00Z',
   answeredAt: '',
@@ -157,6 +160,8 @@ describe('usePhoneCalls', () => {
     api.answerCall.mockResolvedValue({ data: ref(call({ state: 'active', answeredAt: '2026-05-27T00:00:10Z' })) })
     api.rejectCall.mockResolvedValue({ data: ref(call({ state: 'ended', endedAt: '2026-05-27T00:00:10Z' })) })
     api.hangupCall.mockResolvedValue({ data: ref(call({ state: 'ended', endedAt: '2026-05-27T00:00:10Z' })) })
+    api.holdCall.mockResolvedValue({ data: ref(call({ state: 'active', hold: 'local' })) })
+    api.resumeCall.mockResolvedValue({ data: ref(call({ state: 'active', hold: 'none' })) })
     api.deleteCall.mockResolvedValue({ data: ref(undefined) })
   })
 
@@ -404,6 +409,24 @@ describe('usePhoneCalls', () => {
     expect(api.answerCall).toHaveBeenCalledWith('modem-1', 'call-1')
     expect(api.rejectCall).toHaveBeenCalledWith('modem-1', 'call-1')
     expect(api.hangupCall).toHaveBeenCalledWith('modem-1', 'call-1')
+  })
+
+  it('holds and resumes active calls through the route-neutral call API', async () => {
+    const { phone } = mountComposable()
+    await flushPromises()
+    const active = call({ state: 'active' })
+
+    await phone.hold(active)
+    expect(phone.activeCall.value?.hold).toBe('local')
+
+    await phone.resume(call({ state: 'active', hold: 'local' }))
+    expect(phone.activeCall.value?.hold).toBe('none')
+
+    await phone.toggleHold(call({ state: 'active' }))
+    await phone.toggleHold(call({ state: 'active', hold: 'local' }))
+
+    expect(api.holdCall).toHaveBeenCalledWith('modem-1', 'call-1')
+    expect(api.resumeCall).toHaveBeenCalledWith('modem-1', 'call-1')
   })
 
   it('deletes terminal records from the local list', async () => {

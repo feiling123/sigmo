@@ -27,6 +27,9 @@ const liveDurationStates = new Set<CallRecord['state']>([
 const mediaSessionStates = new Set<CallRecord['state']>(['early_media', 'active', 'confirmed'])
 const terminalStates = new Set<CallRecord['state']>(['ended', 'failed'])
 
+const localHoldStates = new Set<CallRecord['hold']>(['local', 'local_remote'])
+const remoteHoldStates = new Set<CallRecord['hold']>(['remote', 'local_remote'])
+
 const modemCallSessionKey = Symbol('modem-call-session')
 
 const createModemCallSession = (
@@ -89,6 +92,22 @@ const createModemCallSession = (
     }
   }
 
+  const holdLabel = (value: string) => {
+    switch (value) {
+      case 'local':
+        return t('modemDetail.phone.holdStates.local')
+      case 'remote':
+        return t('modemDetail.phone.holdStates.remote')
+      case 'local_remote':
+        return t('modemDetail.phone.holdStates.localRemote')
+      default:
+        return ''
+    }
+  }
+
+  const isLocallyHeld = (call: CallRecord | null) => !!call && localHoldStates.has(call.hold)
+  const isRemotelyHeld = (call: CallRecord | null) => !!call && remoteHoldStates.has(call.hold)
+
   const primaryLine = (call: CallRecord) =>
     formatPhoneDisplay(call.number, defaultCountry?.value) || t('modemDetail.phone.unknownNumber')
 
@@ -150,6 +169,10 @@ const createModemCallSession = (
     await phoneCalls.answer(call)
   }
 
+  const toggleHold = async (call: CallRecord) => {
+    await phoneCalls.toggleHold(call)
+  }
+
   watch(
     phoneCalls.activeCall,
     (call) => {
@@ -160,9 +183,16 @@ const createModemCallSession = (
       }
 
       if (call && mediaSessionStates.has(call.state) && call.route === 'wifi_calling') {
+        callAudio.setInputEnabled(!localHoldStates.has(call.hold) && !remoteHoldStates.has(call.hold))
         if (audioCallID.value === call.callID) return
         audioCallID.value = call.callID
-        void callAudio.start(call.callID)
+        void Promise.resolve(callAudio.start(call.callID)).then(() => {
+          const current = phoneCalls.activeCall.value
+          if (current?.callID !== call.callID) return
+          callAudio.setInputEnabled(
+            !localHoldStates.has(current.hold) && !remoteHoldStates.has(current.hold),
+          )
+        })
         return
       }
       if (audioCallID.value) {
@@ -180,11 +210,15 @@ const createModemCallSession = (
     callAudio,
     routeLabel,
     stateLabel,
+    holdLabel,
+    isLocallyHeld,
+    isRemotelyHeld,
     primaryLine,
     callDurationLabel,
     activeCallDurationLabel,
     audioMessage,
     answerIncoming,
+    toggleHold,
     setSearchQuery,
     terminalStates,
   }

@@ -26,6 +26,7 @@ const call = (patch: Partial<CallRecord> = {}): CallRecord => ({
   direction: 'incoming',
   number: '+12242255559',
   state: 'ringing',
+  hold: 'none',
   reason: '',
   startedAt: '2026-05-27T00:00:00Z',
   answeredAt: '',
@@ -54,6 +55,9 @@ vi.mock('vue-i18n', () => ({
         'modemDetail.phone.states.ending': 'Ending',
         'modemDetail.phone.states.failed': 'Failed',
         'modemDetail.phone.states.ended': 'Ended',
+        'modemDetail.phone.holdStates.local': 'On hold',
+        'modemDetail.phone.holdStates.remote': 'Remote hold',
+        'modemDetail.phone.holdStates.localRemote': 'Both on hold',
         'modemDetail.phone.unknownNumber': 'Unknown number',
         'modemDetail.phone.durationEmpty': '0:00',
         'modemDetail.phone.audioCodecUnavailable':
@@ -95,6 +99,8 @@ const mountProvider = () =>
             'modemDetail.phone.answer': 'Answer',
             'modemDetail.phone.reject': 'Reject',
             'modemDetail.phone.hangup': 'Hang up',
+            'modemDetail.phone.hold': 'Hold',
+            'modemDetail.phone.resume': 'Resume',
             'modemDetail.phone.duration': 'Duration',
           })[key] ?? key,
       },
@@ -138,6 +144,9 @@ describe('ModemCallProvider', () => {
       answer: vi.fn(),
       reject: vi.fn(),
       hangup: vi.fn(),
+      hold: vi.fn(),
+      resume: vi.fn(),
+      toggleHold: vi.fn(),
       loadCalls: vi.fn(),
     })
     callsHarness.useCallAudioSession.mockReset()
@@ -147,6 +156,7 @@ describe('ModemCallProvider', () => {
       prepare: vi.fn(),
       start: vi.fn(),
       stop: vi.fn(),
+      setInputEnabled: vi.fn(),
     })
   })
 

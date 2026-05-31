@@ -8,6 +8,7 @@ type DialRequest struct {
 type UpdateCallRequest struct {
 	State  string `json:"state"`
 	Reason string `json:"reason"`
+	Hold   string `json:"hold"`
 }
 
 type CallResponse struct {
@@ -16,6 +17,7 @@ type CallResponse struct {
 	Direction  string `json:"direction"`
 	Number     string `json:"number"`
 	State      string `json:"state"`
+	Hold       string `json:"hold"`
 	Reason     string `json:"reason"`
 	StartedAt  string `json:"startedAt"`
 	AnsweredAt string `json:"answeredAt"`

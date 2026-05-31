@@ -397,6 +397,7 @@ func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to stri
 		return failedOutgoingVoiceCall(modem.EquipmentIdentifier, profileID, to, err), err
 	}
 	info := c.storeVoiceCall(modem.EquipmentIdentifier, profileID, call, strings.TrimSpace(to), string(call.Direction()), string(call.State()), "")
+	info.Hold = voiceHoldState(call)
 	info = initialDialedVoiceCallState(info, call.State())
 	if !info.AnsweredAt.IsZero() {
 		c.updateVoiceCall(modem.EquipmentIdentifier, info.ID, info)
@@ -538,6 +539,7 @@ func (c *coordinator) AnswerCall(ctx context.Context, modem *mmodem.Modem, callI
 		return VoiceCall{}, normalizeVoiceError(err)
 	}
 	info.State = string(call.State())
+	info.Hold = voiceHoldState(call)
 	info.AnsweredAt = time.Now()
 	info.UpdatedAt = info.AnsweredAt
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
@@ -554,6 +556,7 @@ func (c *coordinator) RejectCall(ctx context.Context, modem *mmodem.Modem, callI
 		return VoiceCall{}, normalizeVoiceError(err)
 	}
 	info.State = string(call.State())
+	info.Hold = voiceHoldState(call)
 	info.Reason = "Busy Here"
 	info.EndedAt = time.Now()
 	info.UpdatedAt = info.EndedAt
@@ -571,8 +574,41 @@ func (c *coordinator) HangupCall(ctx context.Context, modem *mmodem.Modem, callI
 		return VoiceCall{}, normalizeVoiceError(err)
 	}
 	info.State = string(call.State())
+	info.Hold = voiceHoldState(call)
 	info.EndedAt = time.Now()
 	info.UpdatedAt = info.EndedAt
+	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
+	c.publishVoiceEvent(info)
+	return info, nil
+}
+
+func (c *coordinator) HoldCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
+	call, info, err := c.lookupVoiceCall(ctx, modem, callID)
+	if err != nil {
+		return VoiceCall{}, err
+	}
+	if err := call.Hold(ctx); err != nil {
+		return VoiceCall{}, normalizeVoiceError(err)
+	}
+	info.State = string(call.State())
+	info.Hold = voiceHoldState(call)
+	info.UpdatedAt = time.Now()
+	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
+	c.publishVoiceEvent(info)
+	return info, nil
+}
+
+func (c *coordinator) ResumeCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
+	call, info, err := c.lookupVoiceCall(ctx, modem, callID)
+	if err != nil {
+		return VoiceCall{}, err
+	}
+	if err := call.Resume(ctx); err != nil {
+		return VoiceCall{}, normalizeVoiceError(err)
+	}
+	info.State = string(call.State())
+	info.Hold = voiceHoldState(call)
+	info.UpdatedAt = time.Now()
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
 	c.publishVoiceEvent(info)
 	return info, nil
@@ -653,6 +689,9 @@ func (s callMediaSession) ReadPacket(ctx context.Context) ([]byte, error) {
 }
 
 func (s callMediaSession) WritePacket(ctx context.Context, packet []byte) error {
+	if s.call.HoldState() != imsvoice.CallHoldNone {
+		return ErrCallOnHold
+	}
 	return s.call.WriteRTP(ctx, packet)
 }
 
@@ -684,6 +723,7 @@ func (c *coordinator) storeVoiceCall(modemID string, profileID string, call *ims
 		Direction: direction,
 		Number:    number,
 		State:     state,
+		Hold:      voiceHoldState(call),
 		Reason:    reason,
 		StartedAt: now,
 		UpdatedAt: now,
@@ -696,9 +736,23 @@ func (c *coordinator) storeVoiceCall(modemID string, profileID string, call *ims
 		if !existing.AnsweredAt.IsZero() {
 			info.AnsweredAt = existing.AnsweredAt
 		}
+		if strings.TrimSpace(existing.Hold) != "" {
+			info.Hold = existing.Hold
+		}
 	}
 	c.updateVoiceCallWithPointer(modemID, call.ID(), call, info)
 	return info
+}
+
+func voiceHoldState(call *imsvoice.Call) string {
+	if call == nil {
+		return string(imsvoice.CallHoldNone)
+	}
+	hold := strings.TrimSpace(string(call.HoldState()))
+	if hold == "" {
+		return string(imsvoice.CallHoldNone)
+	}
+	return hold
 }
 
 func (c *coordinator) voiceCallInfo(modemID string, callID string) VoiceCall {
@@ -1392,6 +1446,7 @@ func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string,
 		return
 	}
 	info := c.storeVoiceCall(modem.EquipmentIdentifier, profileID, incoming.Call, incoming.FromNumber, string(incoming.Call.Direction()), string(incoming.Call.State()), "")
+	info.Hold = voiceHoldState(incoming.Call)
 	if !incoming.ReceivedAt.IsZero() {
 		info.StartedAt = incoming.ReceivedAt
 		info.UpdatedAt = incoming.ReceivedAt
@@ -1413,6 +1468,7 @@ func (c *coordinator) forwardCallEvent(modemID string, event vowifi.CallEvent) {
 				ProfileID: session.pendingDial.profileID,
 				Direction: string(imsvoice.CallDirectionOutgoing),
 				Number:    session.pendingDial.number,
+				Hold:      string(imsvoice.CallHoldNone),
 				StartedAt: session.pendingDial.startedAt,
 			}
 			state = &voiceCallState{info: info, updatedAt: info.StartedAt}
@@ -1424,6 +1480,13 @@ func (c *coordinator) forwardCallEvent(modemID string, event vowifi.CallEvent) {
 			}
 			info = state.info
 			info.State = string(event.State)
+			if hold := strings.TrimSpace(string(event.Hold)); hold != "" {
+				info.Hold = hold
+			} else if event.Call != nil {
+				info.Hold = voiceHoldState(event.Call)
+			} else if info.Hold == "" {
+				info.Hold = string(imsvoice.CallHoldNone)
+			}
 			info.Reason = event.Cause
 			info.UpdatedAt = event.At
 			if info.UpdatedAt.IsZero() {

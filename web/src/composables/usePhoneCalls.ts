@@ -15,7 +15,13 @@ const currentStates = new Set([
   'ending',
 ])
 
+const normalizeCall = (call: CallRecord): CallRecord => ({
+  ...call,
+  hold: call.hold || 'none',
+})
+
 const mergeCall = (items: CallRecord[], call: CallRecord) => {
+  call = normalizeCall(call)
   const index = items.findIndex((item) => item.callID === call.callID)
   if (index === -1) {
     return [call, ...items]
@@ -188,6 +194,7 @@ export const usePhoneCalls = (
   }
 
   const setCallState = (call: CallRecord) => {
+    call = normalizeCall(call)
     const previousIncoming = incomingCall.value
     const previousActive = activeCall.value
     calls.value = callMatchesSearch(call)
@@ -230,7 +237,7 @@ export const usePhoneCalls = (
     errorMessage.value = ''
     try {
       const { data } = await callApi.listCalls(id, query)
-      const nextCalls = data.value ?? []
+      const nextCalls = (data.value ?? []).map(normalizeCall)
       if (currentRequestID !== loadRequestID) return
       calls.value = nextCalls
       if (!query) {
@@ -343,6 +350,38 @@ export const usePhoneCalls = (
     }
   }
 
+  const hold = async (call: CallRecord) => {
+    const id = modemId.value
+    if (!id || id === 'unknown') return
+    errorMessage.value = ''
+    try {
+      const { data } = await callApi.holdCall(id, call.callID)
+      if (data.value) setCallState(data.value)
+    } catch (err) {
+      errorMessage.value = err instanceof Error ? err.message : 'Hold failed'
+    }
+  }
+
+  const resume = async (call: CallRecord) => {
+    const id = modemId.value
+    if (!id || id === 'unknown') return
+    errorMessage.value = ''
+    try {
+      const { data } = await callApi.resumeCall(id, call.callID)
+      if (data.value) setCallState(data.value)
+    } catch (err) {
+      errorMessage.value = err instanceof Error ? err.message : 'Resume failed'
+    }
+  }
+
+  const toggleHold = async (call: CallRecord) => {
+    if (call.hold === 'local' || call.hold === 'local_remote') {
+      await resume(call)
+      return
+    }
+    await hold(call)
+  }
+
   const deleteRecord = async (call: CallRecord) => {
     const id = modemId.value
     if (!id || id === 'unknown' || isDeletingCallID.value) return false
@@ -406,6 +445,9 @@ export const usePhoneCalls = (
     answer,
     reject,
     hangup,
+    hold,
+    resume,
+    toggleHold,
     deleteRecord,
     loadCalls,
   }

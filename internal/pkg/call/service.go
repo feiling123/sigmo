@@ -35,6 +35,11 @@ const (
 	StateEnded      = "ended"
 	StateFailed     = "failed"
 
+	HoldNone        = "none"
+	HoldLocal       = "local"
+	HoldRemote      = "remote"
+	HoldLocalRemote = "local_remote"
+
 	ReasonBusy = "busy"
 )
 
@@ -51,6 +56,8 @@ var (
 	ErrCallRecordActive        = errors.New("active calls cannot be deleted")
 	ErrMediaUnavailable        = errors.New("call media is not available")
 	ErrUnsupportedCodec        = errors.New("call media codec is not supported")
+	ErrInvalidCallHold         = errors.New("call hold must be local or none")
+	ErrCallUpdateConflict      = errors.New("call update cannot change state and hold together")
 )
 
 type Service struct {
@@ -72,6 +79,12 @@ type Service struct {
 
 type Event struct {
 	Call storage.Call
+}
+
+type UpdateRequest struct {
+	State  string
+	Reason string
+	Hold   string
 }
 
 type MediaInfo struct {
@@ -228,19 +241,54 @@ func (s *Service) Reject(ctx context.Context, modem *mmodem.Modem, callID string
 	}
 }
 
-func (s *Service) Update(ctx context.Context, modem *mmodem.Modem, callID string, state string, reason string) (storage.Call, error) {
-	state = strings.TrimSpace(state)
-	reason = strings.TrimSpace(reason)
-	switch state {
+func (s *Service) Update(ctx context.Context, modem *mmodem.Modem, callID string, req UpdateRequest) (storage.Call, error) {
+	req.State = strings.TrimSpace(req.State)
+	req.Reason = strings.TrimSpace(req.Reason)
+	req.Hold = strings.TrimSpace(req.Hold)
+	if req.State != "" && req.Hold != "" {
+		return storage.Call{}, ErrCallUpdateConflict
+	}
+	if req.Hold != "" {
+		return s.SetHold(ctx, modem, callID, req.Hold)
+	}
+	switch req.State {
 	case StateActive:
 		return s.Answer(ctx, modem, callID)
 	case StateEnded:
-		if reason == ReasonBusy {
+		if req.Reason == ReasonBusy {
 			return s.Reject(ctx, modem, callID)
 		}
 		return s.Hangup(ctx, modem, callID)
 	default:
 		return storage.Call{}, ErrInvalidCallState
+	}
+}
+
+func (s *Service) SetHold(ctx context.Context, modem *mmodem.Modem, callID string, hold string) (storage.Call, error) {
+	hold = strings.TrimSpace(hold)
+	if hold != HoldLocal && hold != HoldNone {
+		return storage.Call{}, ErrInvalidCallHold
+	}
+	call, err := s.callForAction(ctx, modem, callID)
+	if err != nil {
+		return storage.Call{}, err
+	}
+	switch call.Route {
+	case RouteWiFiCalling:
+		var updated wificalling.VoiceCall
+		if hold == HoldLocal {
+			updated, err = s.wifiCalling.HoldCall(ctx, modem, call.ID)
+		} else {
+			updated, err = s.wifiCalling.ResumeCall(ctx, modem, call.ID)
+		}
+		if err := mapWiFiCallingActionError("update hold", err); err != nil {
+			return storage.Call{}, err
+		}
+		return s.saveAndPublish(ctx, callFromWiFiCalling(updated))
+	case RouteModem:
+		return storage.Call{}, ErrModemCallingUnavailable
+	default:
+		return storage.Call{}, ErrInvalidRoute
 	}
 }
 
@@ -486,11 +534,22 @@ func callFromWiFiCalling(call wificalling.VoiceCall) storage.Call {
 		Direction:  call.Direction,
 		Number:     call.Number,
 		State:      state,
+		Hold:       normalizeHold(call.Hold),
 		Reason:     call.Reason,
 		StartedAt:  startedAt,
 		AnsweredAt: call.AnsweredAt,
 		EndedAt:    call.EndedAt,
 		UpdatedAt:  updatedAt,
+	}
+}
+
+func normalizeHold(hold string) string {
+	hold = strings.TrimSpace(hold)
+	switch hold {
+	case HoldLocal, HoldRemote, HoldLocalRemote:
+		return hold
+	default:
+		return HoldNone
 	}
 }
 

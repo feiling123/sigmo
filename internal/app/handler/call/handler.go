@@ -37,6 +37,8 @@ const (
 	errorCodeModemCallingUnavailable   = "modem_calling_unavailable"
 	errorCodeCallNotFound              = "call_not_found"
 	errorCodeInvalidCallState          = "invalid_call_state"
+	errorCodeInvalidCallHold           = "invalid_call_hold"
+	errorCodeCallUpdateConflict        = "call_update_conflict"
 	errorCodeCallRecordActive          = "call_record_active"
 	errorCodeHangupCallFailed          = "hangup_call_failed"
 	errorCodeDeleteCallFailed          = "delete_call_failed"
@@ -93,7 +95,11 @@ func (h *Handler) Update(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateCallInvalidRequest); err != nil {
 		return err
 	}
-	call, err := h.calls.Update(c.Request().Context(), modem, callIDParam(c), req.State, req.Reason)
+	call, err := h.calls.Update(c.Request().Context(), modem, callIDParam(c), pcall.UpdateRequest{
+		State:  req.State,
+		Reason: req.Reason,
+		Hold:   req.Hold,
+	})
 	if err != nil {
 		return callActionError(c, err, errorCodeUpdateCallFailed)
 	}
@@ -296,6 +302,10 @@ func callActionError(c *echo.Context, err error, fallback string) error {
 		return httpapi.NotFound(c, errorCodeCallNotFound, err)
 	case errors.Is(err, pcall.ErrInvalidCallState):
 		return httpapi.BadRequest(c, errorCodeInvalidCallState, err)
+	case errors.Is(err, pcall.ErrInvalidCallHold):
+		return httpapi.BadRequest(c, errorCodeInvalidCallHold, err)
+	case errors.Is(err, pcall.ErrCallUpdateConflict):
+		return httpapi.BadRequest(c, errorCodeCallUpdateConflict, err)
 	case errors.Is(err, pcall.ErrCallRecordActive):
 		return httpapi.Error(c, http.StatusConflict, errorCodeCallRecordActive, err.Error())
 	case fallback == errorCodeDialCallFailed:
@@ -334,12 +344,17 @@ func buildCallResponses(calls []storage.Call) []CallResponse {
 }
 
 func buildCallResponse(call storage.Call) CallResponse {
+	hold := strings.TrimSpace(call.Hold)
+	if hold == "" {
+		hold = pcall.HoldNone
+	}
 	return CallResponse{
 		ID:         call.ID,
 		Route:      call.Route,
 		Direction:  call.Direction,
 		Number:     call.Number,
 		State:      call.State,
+		Hold:       hold,
 		Reason:     call.Reason,
 		StartedAt:  callTime(call.StartedAt),
 		AnsweredAt: callTime(call.AnsweredAt),

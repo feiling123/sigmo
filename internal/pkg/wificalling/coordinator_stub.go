@@ -94,6 +94,14 @@ func (c *coordinator) HangupCall(ctx context.Context, modem *mmodem.Modem, callI
 	return VoiceCall{}, ErrUnavailable
 }
 
+func (c *coordinator) HoldCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
+	return VoiceCall{}, ErrUnavailable
+}
+
+func (c *coordinator) ResumeCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
+	return VoiceCall{}, ErrUnavailable
+}
+
 func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, callID string) (MediaSession, error) {
 	return nil, ErrUnavailable
 }

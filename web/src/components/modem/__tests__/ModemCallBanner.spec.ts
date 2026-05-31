@@ -12,6 +12,7 @@ const call = (patch: Partial<CallRecord> = {}): CallRecord => ({
   direction: 'incoming',
   number: '+12242255559',
   state: 'ringing',
+  hold: 'none',
   reason: '',
   startedAt: '2026-05-27T00:00:00Z',
   answeredAt: '',
@@ -35,9 +36,13 @@ const makeSession = (state: {
     primaryLine: (item: CallRecord) => (item.number ? '(224) 225-5559' : 'Unknown number'),
     routeLabel: () => 'Wi-Fi Calling',
     stateLabel: (value: string) => (value === 'answering' ? 'Answering' : 'In call'),
+    holdLabel: (value: string) => (value === 'local' ? 'On hold' : ''),
+    isLocallyHeld: (item: CallRecord | null) => item?.hold === 'local' || item?.hold === 'local_remote',
+    isRemotelyHeld: (item: CallRecord | null) => item?.hold === 'remote' || item?.hold === 'local_remote',
     answerIncoming: vi.fn(),
     reject: vi.fn(),
     hangup: vi.fn(),
+    toggleHold: vi.fn(),
   }) as unknown as ModemCallSession
 
 const mountBanner = (session: ModemCallSession) =>
@@ -50,6 +55,8 @@ const mountBanner = (session: ModemCallSession) =>
             'modemDetail.phone.answer': 'Answer',
             'modemDetail.phone.reject': 'Reject',
             'modemDetail.phone.hangup': 'Hang up',
+            'modemDetail.phone.hold': 'Hold',
+            'modemDetail.phone.resume': 'Resume',
             'modemDetail.phone.duration': 'Duration',
           })[key] ?? key,
       },
@@ -69,6 +76,8 @@ vi.mock('lucide-vue-next', () => ({
   PhoneCall: { template: '<span />' },
   PhoneIncoming: { template: '<span />' },
   PhoneOff: { template: '<span />' },
+  Pause: { template: '<span />' },
+  Play: { template: '<span />' },
 }))
 
 describe('ModemCallBanner', () => {
@@ -110,9 +119,27 @@ describe('ModemCallBanner', () => {
     expect(wrapper.text()).toContain('1:05')
     expect(wrapper.text()).toContain('Call audio requires an AMR/AMR-WB codec module.')
 
+    await wrapper.get('button[aria-label="Hold"]').trigger('click')
     await wrapper.get('button[aria-label="Hang up"]').trigger('click')
 
+    expect(session.toggleHold).toHaveBeenCalledWith(active)
     expect(session.hangup).toHaveBeenCalledWith(active)
+  })
+
+  it('shows local hold state and resume action', async () => {
+    const active = call({
+      direction: 'outgoing',
+      state: 'active',
+      hold: 'local',
+      answeredAt: '2026-05-27T00:00:10Z',
+    })
+    const session = makeSession({ activeCall: active })
+    const wrapper = mountBanner(session)
+
+    expect(wrapper.text()).toContain('On hold')
+    await wrapper.get('button[aria-label="Resume"]').trigger('click')
+
+    expect(session.toggleHold).toHaveBeenCalledWith(active)
   })
 
   it('keeps answering calls visible and hides terminal calls', async () => {

@@ -35,6 +35,7 @@ var (
 	ErrEntitlementPending  = errors.New("wifi calling entitlement is pending")
 	ErrEntitlementDenied   = errors.New("wifi calling entitlement denied")
 	ErrUnsupportedCodec    = errors.New("wifi calling voice codec is not supported")
+	ErrCallOnHold          = errors.New("wifi calling call is on hold")
 	ErrWebsheetNotPending  = errors.New("wifi calling websheet is not pending")
 	ErrWebsheetDismissed   = errors.New("wifi calling websheet was dismissed")
 	ErrWebsheetUnavailable = errors.New("wifi calling websheet is unavailable")
@@ -67,6 +68,7 @@ type VoiceCall struct {
 	Direction  string
 	Number     string
 	State      string
+	Hold       string
 	Reason     string
 	StartedAt  time.Time
 	AnsweredAt time.Time
@@ -112,6 +114,8 @@ type Coordinator interface {
 	AnswerCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
 	RejectCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
 	HangupCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
+	HoldCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
+	ResumeCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
 	OpenCallMedia(context.Context, *mmodem.Modem, string) (MediaSession, error)
 	SubscribeVoiceEvents(VoiceEventFunc) func()
 }

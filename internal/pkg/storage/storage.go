@@ -87,6 +87,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 			direction TEXT NOT NULL,
 			number TEXT NOT NULL,
 			state TEXT NOT NULL,
+			hold_state TEXT NOT NULL DEFAULT 'none',
 			reason TEXT NOT NULL,
 			started_at TEXT NOT NULL,
 			answered_at TEXT NOT NULL,
@@ -101,6 +102,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 		}
 	}
 	if err := s.migrateMessageFingerprints(ctx); err != nil {
+		return err
+	}
+	if err := s.migrateCallHoldState(ctx); err != nil {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_fingerprint ON messages(fingerprint) WHERE fingerprint <> ''`); err != nil {
@@ -121,7 +125,7 @@ func (s *Store) migrateMessageFingerprints(ctx context.Context) error {
 		}
 	}()
 
-	hasFingerprint, err := messageColumnExists(ctx, tx, "fingerprint")
+	hasFingerprint, err := tableColumnExists(ctx, tx, "messages", "fingerprint")
 	if err != nil {
 		return err
 	}
@@ -138,10 +142,39 @@ func (s *Store) migrateMessageFingerprints(ctx context.Context) error {
 	return nil
 }
 
-func messageColumnExists(ctx context.Context, tx *sql.Tx, name string) (bool, error) {
-	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(messages)`)
+func (s *Store) migrateCallHoldState(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("read message columns: %w", err)
+		return fmt.Errorf("start call hold migration: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	hasHold, err := tableColumnExists(ctx, tx, "calls", "hold_state")
+	if err != nil {
+		return err
+	}
+	if !hasHold {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN hold_state TEXT NOT NULL DEFAULT 'none'`); err != nil {
+			return fmt.Errorf("add call hold column: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit call hold migration: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func tableColumnExists(ctx context.Context, tx *sql.Tx, table string, name string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		return false, fmt.Errorf("read %s columns: %w", table, err)
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -157,7 +190,7 @@ func messageColumnExists(ctx context.Context, tx *sql.Tx, name string) (bool, er
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("read message columns: %w", err)
+		return false, fmt.Errorf("read %s columns: %w", table, err)
 	}
 	return false, nil
 }

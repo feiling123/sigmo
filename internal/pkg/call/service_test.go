@@ -128,7 +128,7 @@ func TestRunPersistsAndPublishesWiFiCallingVoiceEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCall() error = %v", err)
 	}
-	if stored.Route != RouteWiFiCalling || stored.State != StateRinging || stored.Number != "+12242255559" {
+	if stored.Route != RouteWiFiCalling || stored.State != StateRinging || stored.Number != "+12242255559" || stored.Hold != HoldNone {
 		t.Fatalf("stored call = %+v, want Wi-Fi Calling ringing call", stored)
 	}
 
@@ -414,9 +414,25 @@ func TestEndUnavailableWiFiCallingMediaIgnoresTerminalCall(t *testing.T) {
 
 func TestUpdateRejectsUnsupportedState(t *testing.T) {
 	service := New(nil, fakeWiFiCalling{})
-	_, err := service.Update(context.Background(), nil, "call-1", StateFailed, "")
+	_, err := service.Update(context.Background(), nil, "call-1", UpdateRequest{State: StateFailed})
 	if !errors.Is(err, ErrInvalidCallState) {
 		t.Fatalf("Update() error = %v, want %v", err, ErrInvalidCallState)
+	}
+}
+
+func TestUpdateRejectsStateAndHoldTogether(t *testing.T) {
+	service := New(nil, fakeWiFiCalling{})
+	_, err := service.Update(context.Background(), nil, "call-1", UpdateRequest{State: StateActive, Hold: HoldLocal})
+	if !errors.Is(err, ErrCallUpdateConflict) {
+		t.Fatalf("Update() error = %v, want %v", err, ErrCallUpdateConflict)
+	}
+}
+
+func TestSetHoldRejectsInvalidHold(t *testing.T) {
+	service := New(nil, fakeWiFiCalling{})
+	_, err := service.SetHold(context.Background(), nil, "call-1", HoldRemote)
+	if !errors.Is(err, ErrInvalidCallHold) {
+		t.Fatalf("SetHold() error = %v, want %v", err, ErrInvalidCallHold)
 	}
 }
 
@@ -532,6 +548,8 @@ type fakeWiFiCalling struct {
 	answerCall wificalling.VoiceCall
 	rejectCall wificalling.VoiceCall
 	hangupCall wificalling.VoiceCall
+	holdCall   wificalling.VoiceCall
+	resumeCall wificalling.VoiceCall
 	mediaErr   error
 	subscribe  func(wificalling.VoiceEventFunc) func()
 }
@@ -575,6 +593,12 @@ func (f fakeWiFiCalling) RejectCall(context.Context, *mmodem.Modem, string) (wif
 }
 func (f fakeWiFiCalling) HangupCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
 	return f.hangupCall, nil
+}
+func (f fakeWiFiCalling) HoldCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+	return f.holdCall, nil
+}
+func (f fakeWiFiCalling) ResumeCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+	return f.resumeCall, nil
 }
 func (f fakeWiFiCalling) OpenCallMedia(context.Context, *mmodem.Modem, string) (wificalling.MediaSession, error) {
 	if f.mediaErr != nil {

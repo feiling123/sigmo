@@ -19,6 +19,7 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/voicecodec"
+	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 const (
@@ -544,7 +545,9 @@ func (b *webRTCBridge) runUplink(track *webrtc.TrackRemote, codec bridgeCodec) {
 				b.stop()
 				return
 			}
-			if err := b.media.WritePacket(b.ctx, data); err != nil {
+			if err := b.media.WritePacket(b.ctx, data); errors.Is(err, wificalling.ErrCallOnHold) {
+				continue
+			} else if err != nil {
 				b.stop()
 				return
 			}
@@ -581,7 +584,9 @@ func (b *webRTCBridge) runPCMUPassthroughUplink(track *webrtc.TrackRemote) {
 			b.stop()
 			return
 		}
-		if err := b.media.WritePacket(b.ctx, data); err != nil {
+		if err := b.media.WritePacket(b.ctx, data); errors.Is(err, wificalling.ErrCallOnHold) {
+			continue
+		} else if err != nil {
 			b.stop()
 			return
 		}

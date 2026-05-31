@@ -78,6 +78,7 @@ describe('useCallApi', () => {
           direction: 'incoming',
           number: '+12242255559',
           state: 'active',
+          hold: 'none',
           reason: '',
           startedAt: '2026-05-27T00:00:00Z',
           answeredAt: '2026-05-27T00:00:05Z',
@@ -120,6 +121,32 @@ describe('useCallApi', () => {
       2,
       expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1'),
       expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('holds and resumes calls with PATCH requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = useCallApi()
+
+    await api.holdCall('modem-1', 'call/1')
+    await api.resumeCall('modem-1', 'call/1')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ hold: 'local' }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ hold: 'none' }),
+      }),
     )
   })
 })

@@ -285,6 +285,14 @@ func (fakeWiFiCalling) HangupCall(context.Context, *mmodem.Modem, string) (wific
 	return wificalling.VoiceCall{}, nil
 }
 
+func (fakeWiFiCalling) HoldCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+	return wificalling.VoiceCall{}, nil
+}
+
+func (fakeWiFiCalling) ResumeCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+	return wificalling.VoiceCall{}, nil
+}
+
 func (fakeWiFiCalling) OpenCallMedia(context.Context, *mmodem.Modem, string) (wificalling.MediaSession, error) {
 	return nil, nil
 }
