@@ -1,5 +1,3 @@
-import type { ApiErrorResponse } from '@/types/api'
-
 export type CallRoute = 'auto' | 'wifi_calling' | 'modem'
 export type StoredCallRoute = Exclude<CallRoute, 'auto'>
 export type CallDirection = 'incoming' | 'outgoing'
@@ -42,23 +40,7 @@ export type CallEventMessage = {
   call: CallRecord
 }
 
-export type CallMediaInfo = {
-  codec: string
-  payloadType: number
-  clockRate: number
-  channels: number
-  octetAlign: boolean
-  dtmfPayloadType: number
-  dtmfClockRate: number
-  ptimeMillis: number
-}
-
-export type CallMediaReadyMessage = {
-  type: 'ready'
-  media: CallMediaInfo
-}
-
-export type CallMediaErrorMessage = {
-  type: 'error'
-  error: ApiErrorResponse
+export type WebRTCSessionDescriptionPayload = {
+  type: 'offer' | 'answer'
+  sdp: string
 }

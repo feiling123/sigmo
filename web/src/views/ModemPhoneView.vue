@@ -32,7 +32,6 @@ import { Spinner } from '@/components/ui/spinner'
 import { useModemCallSession } from '@/composables/useModemCallSession'
 import { useModemPhoneCountry } from '@/composables/useModemPhoneCountry'
 import { useStickyTopBar } from '@/composables/useStickyTopBar'
-import { hasBrowserAmrCodec } from '@/lib/browserAmrCodec'
 import { formatListTimestamp } from '@/lib/datetime'
 import { dialStringChars, formatDialInput, isDialServiceCode } from '@/lib/phoneNumberInput'
 import type { CallRecord } from '@/types/call'
@@ -76,6 +75,7 @@ const dialpadOpen = ref(false)
 const expandedCallID = ref('')
 const deleteDialogOpen = ref(false)
 const deleteTarget = ref<CallRecord | null>(null)
+const dialingCallBackID = ref('')
 const digits = ref('')
 const plusLongPressTimer = ref<number | null>(null)
 const suppressNextZeroClick = ref(false)
@@ -113,7 +113,7 @@ const dialInputClass = computed(() => {
 
 const isUssd = (value: string) => isDialServiceCode(value)
 
-const shouldPrepareOutgoingAudio = () => hasBrowserAmrCodec() && wifiCallingConnected.value
+const shouldPrepareOutgoingAudio = () => wifiCallingConnected.value
 
 const setDigits = (value: string) => {
   digits.value = formatDialInput(value, phoneCountry.value)
@@ -169,6 +169,22 @@ const openUssdDialog = (code: string) => {
   ussdDialogOpen.value = true
 }
 
+const dialTarget = async (target: string, clearDigitsOnSuccess = false) => {
+  if (!target) return
+  const preparedAudio = shouldPrepareOutgoingAudio()
+  const audioReady = preparedAudio ? callAudio.prepare() : Promise.resolve(false)
+  dialpadOpen.value = false
+  const call = await dial(target)
+  if (call) {
+    if (clearDigitsOnSuccess) {
+      digits.value = ''
+    }
+    await loadCalls()
+  } else if (preparedAudio && (await audioReady)) {
+    callAudio.stop()
+  }
+}
+
 const startDial = async () => {
   const target = normalizedDigits.value
   if (!target) return
@@ -179,24 +195,25 @@ const startDial = async () => {
     digits.value = ''
     return
   }
-  const preparedAudio = shouldPrepareOutgoingAudio()
-  if (preparedAudio) {
-    const ready = await callAudio.prepare()
-    if (!ready) return
-  }
-  dialpadOpen.value = false
-  const call = await dial(target)
-  if (call) {
-    digits.value = ''
-    await loadCalls()
-  } else if (preparedAudio) {
-    callAudio.stop()
-  }
+  await dialTarget(target, true)
 }
 
 const dialNumber = async (number: string) => {
-  setDigits(number)
-  await startDial()
+  const target = dialStringChars(number)
+  if (!target) return
+  await dialTarget(target)
+}
+
+const callBack = async (call: CallRecord) => {
+  if (!call.number || dialingCallBackID.value) return
+  dialingCallBackID.value = call.callID
+  try {
+    await dialNumber(call.number)
+  } finally {
+    if (dialingCallBackID.value === call.callID) {
+      dialingCallBackID.value = ''
+    }
+  }
 }
 
 const sendUssd = async () => {
@@ -409,11 +426,13 @@ watch(dialpadOpen, async (open) => {
             size="icon"
             variant="ghost"
             class="size-8 shrink-0 rounded-full opacity-100 transition"
-            :disabled="!call.number"
+            :disabled="!call.number || isDialing || !!dialingCallBackID"
+            :aria-busy="dialingCallBackID === call.callID"
             :aria-label="t('modemDetail.phone.callBack')"
-            @click.stop="dialNumber(call.number)"
+            @click.stop="callBack(call)"
           >
-            <PhoneCall class="size-4" />
+            <Spinner v-if="dialingCallBackID === call.callID" class="size-4" />
+            <PhoneCall v-else class="size-4" />
           </Button>
         </div>
 

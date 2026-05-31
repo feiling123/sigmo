@@ -1,7 +1,5 @@
 package call
 
-import "github.com/damonto/sigmo/internal/app/httpapi"
-
 type DialRequest struct {
 	To    string `json:"to"`
 	Route string `json:"route"`
@@ -30,19 +28,12 @@ type EventMessage struct {
 	Call CallResponse `json:"call"`
 }
 
-type MediaInfoResponse struct {
-	Codec           string `json:"codec"`
-	PayloadType     int    `json:"payloadType"`
-	ClockRate       int    `json:"clockRate"`
-	Channels        int    `json:"channels"`
-	OctetAlign      bool   `json:"octetAlign"`
-	DTMFPayloadType int    `json:"dtmfPayloadType"`
-	DTMFClockRate   int    `json:"dtmfClockRate"`
-	PTimeMillis     int    `json:"ptimeMillis"`
+type WebRTCSessionDescriptionRequest struct {
+	Type string `json:"type" validate:"required"`
+	SDP  string `json:"sdp" validate:"required"`
 }
 
-type MediaMessage struct {
-	Type  string                 `json:"type"`
-	Media *MediaInfoResponse     `json:"media,omitempty"`
-	Error *httpapi.ErrorResponse `json:"error,omitempty"`
+type WebRTCSessionDescriptionResponse struct {
+	Type string `json:"type"`
+	SDP  string `json:"sdp"`
 }

@@ -39,10 +39,6 @@ const callAudioHarness = vi.hoisted(() => ({
   stop: vi.fn(),
 }))
 
-const browserCodecHarness = vi.hoisted(() => ({
-  hasCodec: false,
-}))
-
 const datetimeHarness = vi.hoisted(() => ({
   formatListTimestamp: vi.fn(),
 }))
@@ -143,11 +139,6 @@ vi.mock('@/composables/usePhoneCalls', () => ({
 
 vi.mock('@/composables/useCallAudioSession', () => ({
   useCallAudioSession: () => callAudioHarness,
-}))
-
-vi.mock('@/lib/browserAmrCodec', () => ({
-  createBrowserAmrCodec: vi.fn(),
-  hasBrowserAmrCodec: () => browserCodecHarness.hasCodec,
 }))
 
 vi.mock('@/lib/datetime', () => ({
@@ -264,19 +255,25 @@ describe('ModemPhoneView phone interactions', () => {
     callAudioHarness.prepare.mockResolvedValue(true)
     callAudioHarness.start.mockReset()
     callAudioHarness.stop.mockReset()
-    browserCodecHarness.hasCodec = false
     datetimeHarness.formatListTimestamp.mockReset()
     datetimeHarness.formatListTimestamp.mockImplementation((value: string) => `short ${value}`)
     modemApiHarness.getWiFiCallingSettings.mockReset()
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
-      data: ref({ enabled: true, preferred: true, connected: false, state: 'disconnected' }),
+      data: ref({
+        enabled: true,
+        preferred: true,
+        connected: false,
+        state: 'disconnected',
+      }),
     })
     modemApiHarness.getModem.mockReset()
     modemApiHarness.getModem.mockResolvedValue({
       data: ref({ sim: { regionCode: 'US' } }),
     })
     ussdHarness.executeUssd.mockReset()
-    ussdHarness.executeUssd.mockResolvedValue({ data: ref({ reply: 'Balance: 1' }) })
+    ussdHarness.executeUssd.mockResolvedValue({
+      data: ref({ reply: 'Balance: 1' }),
+    })
   })
 
   it('routes star-prefixed input to the USSD dialog and sends it immediately', async () => {
@@ -421,6 +418,71 @@ describe('ModemPhoneView phone interactions', () => {
     expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559')
   })
 
+  it('shows immediate loading feedback when calling back from recent records', async () => {
+    phoneHarness.recentCalls = [
+      {
+        callID: 'call-out',
+        route: 'wifi_calling',
+        direction: 'outgoing',
+        number: '+12242255559',
+        state: 'ended',
+        reason: '',
+        startedAt: '2026-05-27T00:00:00Z',
+        answeredAt: '2026-05-27T00:00:10Z',
+        endedAt: '2026-05-27T00:01:15Z',
+        updatedAt: '2026-05-27T00:01:15Z',
+      },
+    ]
+    const pendingDial = deferredCall()
+    phoneHarness.dial.mockReturnValueOnce(pendingDial.promise)
+    const wrapper = mountView()
+    await flushPromises()
+    const button = wrapper
+      .findAll('button')
+      .find((item) => item.attributes('aria-label') === 'Call back')
+
+    await button?.trigger('click')
+
+    expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559')
+    expect(button?.attributes('aria-busy')).toBe('true')
+    expect(button?.attributes('disabled')).toBeDefined()
+
+    pendingDial.resolve(null)
+    await flushPromises()
+
+    expect(button?.attributes('aria-busy')).toBe('false')
+    expect(button?.attributes('disabled')).toBeUndefined()
+  })
+
+  it('does not copy recent record callbacks into the dialpad input', async () => {
+    phoneHarness.recentCalls = [
+      {
+        callID: 'call-out',
+        route: 'wifi_calling',
+        direction: 'outgoing',
+        number: '+12242255559',
+        state: 'ended',
+        reason: '',
+        startedAt: '2026-05-27T00:00:00Z',
+        answeredAt: '2026-05-27T00:00:10Z',
+        endedAt: '2026-05-27T00:01:15Z',
+        updatedAt: '2026-05-27T00:01:15Z',
+      },
+    ]
+    phoneHarness.dial.mockResolvedValue(null)
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper
+      .findAll('button')
+      .find((item) => item.attributes('aria-label') === 'Call back')
+      ?.trigger('click')
+    await flushPromises()
+    await wrapper.get('button[aria-label="Open dialpad"]').trigger('click')
+
+    expect((wrapper.get('input[aria-label="Number"]').element as HTMLInputElement).value).toBe('')
+  })
+
   it('expands a terminal call record and confirms deletion', async () => {
     phoneHarness.recentCalls = [
       {
@@ -461,10 +523,14 @@ describe('ModemPhoneView phone interactions', () => {
     expect(phoneHarness.deleteRecord).toHaveBeenCalledWith(phoneHarness.recentCalls[0])
   })
 
-  it('prepares browser audio from the outgoing dial user gesture when a codec is available', async () => {
-    browserCodecHarness.hasCodec = true
+  it('prepares WebRTC audio from the outgoing dial user gesture when Wi-Fi Calling is connected', async () => {
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
-      data: ref({ enabled: true, preferred: true, connected: true, state: 'connected' }),
+      data: ref({
+        enabled: true,
+        preferred: true,
+        connected: true,
+        state: 'connected',
+      }),
     })
     phoneHarness.dial.mockResolvedValue({
       callID: 'call-1',
@@ -491,10 +557,14 @@ describe('ModemPhoneView phone interactions', () => {
     expect(phoneHarness.dial).toHaveBeenCalledWith('12')
   })
 
-  it('does not dial when browser audio preparation fails', async () => {
-    browserCodecHarness.hasCodec = true
+  it('starts dialing even when browser audio preparation fails', async () => {
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
-      data: ref({ enabled: true, preferred: true, connected: true, state: 'connected' }),
+      data: ref({
+        enabled: true,
+        preferred: true,
+        connected: true,
+        state: 'connected',
+      }),
     })
     callAudioHarness.prepare.mockResolvedValue(false)
     const wrapper = mountView()
@@ -507,11 +577,10 @@ describe('ModemPhoneView phone interactions', () => {
     await flushPromises()
 
     expect(callAudioHarness.prepare).toHaveBeenCalled()
-    expect(phoneHarness.dial).not.toHaveBeenCalled()
+    expect(phoneHarness.dial).toHaveBeenCalledWith('12')
   })
 
   it('does not prepare outgoing audio when Wi-Fi Calling is disconnected', async () => {
-    browserCodecHarness.hasCodec = true
     const wrapper = mountView()
     await flushPromises()
 
@@ -526,7 +595,21 @@ describe('ModemPhoneView phone interactions', () => {
   })
 
   it('hides the dialpad as soon as dialing starts', async () => {
+    modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
+      data: ref({
+        enabled: true,
+        preferred: true,
+        connected: true,
+        state: 'connected',
+      }),
+    })
+    let resolvePrepare!: (ready: boolean) => void
     const pendingDial = deferredCall()
+    callAudioHarness.prepare.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        resolvePrepare = resolve
+      }),
+    )
     phoneHarness.dial.mockReturnValueOnce(pendingDial.promise)
     const wrapper = mountView()
     await flushPromises()
@@ -538,16 +621,22 @@ describe('ModemPhoneView phone interactions', () => {
 
     await callButton(wrapper)?.trigger('click')
 
+    expect(callAudioHarness.prepare).toHaveBeenCalled()
     expect(phoneHarness.dial).toHaveBeenCalledWith('12')
     expect(wrapper.text()).not.toContain('Dialpad')
+    resolvePrepare(true)
     pendingDial.resolve(null)
     await flushPromises()
   })
 
   it('releases prepared outgoing audio when dialing does not create a call', async () => {
-    browserCodecHarness.hasCodec = true
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
-      data: ref({ enabled: true, preferred: true, connected: true, state: 'connected' }),
+      data: ref({
+        enabled: true,
+        preferred: true,
+        connected: true,
+        state: 'connected',
+      }),
     })
     phoneHarness.dial.mockResolvedValue(null)
     const wrapper = mountView()
@@ -563,8 +652,7 @@ describe('ModemPhoneView phone interactions', () => {
     expect(callAudioHarness.stop).toHaveBeenCalled()
   })
 
-  it('starts browser audio for a confirmed Wi-Fi Calling session', () => {
-    browserCodecHarness.hasCodec = true
+  it('starts WebRTC audio for a confirmed Wi-Fi Calling session', () => {
     phoneHarness.activeCall = {
       callID: 'call-confirmed',
       route: 'wifi_calling',
@@ -583,8 +671,7 @@ describe('ModemPhoneView phone interactions', () => {
     expect(callAudioHarness.start).toHaveBeenCalledWith('call-confirmed')
   })
 
-  it('starts browser audio for an early media Wi-Fi Calling session', () => {
-    browserCodecHarness.hasCodec = true
+  it('starts WebRTC audio for an early media Wi-Fi Calling session', () => {
     phoneHarness.activeCall = {
       callID: 'call-early',
       route: 'wifi_calling',

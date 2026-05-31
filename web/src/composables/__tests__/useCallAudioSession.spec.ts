@@ -1,61 +1,80 @@
-import { mount } from '@vue/test-utils'
-import { nextTick } from 'vue'
 import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCallAudioSession } from '@/composables/useCallAudioSession'
-import { buildRtpPacket } from '@/lib/amrRtp'
-import { encodePCMU, type AmrCodecAdapter } from '@/lib/callMediaPipeline'
 
-const codecFactory = vi.fn(
-  (): AmrCodecAdapter => ({
-    decode: vi.fn(),
-    encode: vi.fn(() => []),
+const createWebRTCAnswer = vi.hoisted(() => vi.fn())
+
+vi.mock('@/apis/call', () => ({
+  useCallApi: () => ({
+    createWebRTCAnswer,
   }),
-)
+}))
 
-class FakeWebSocket {
-  static OPEN = 1
-  static instances: FakeWebSocket[] = []
+class FakePeerConnection {
+  iceGatheringState: RTCIceGatheringState = 'complete'
+  connectionState: RTCPeerConnectionState = 'new'
+  localDescription: RTCSessionDescriptionInit | null = null
+  remoteDescription: RTCSessionDescriptionInit | null = null
+  ontrack: ((event: RTCTrackEvent) => void) | null = null
+  onconnectionstatechange: (() => void) | null = null
+  private listeners = new Map<string, Set<EventListener>>()
 
-  binaryType = ''
-  readyState = FakeWebSocket.OPEN
-  onmessage: ((event: MessageEvent<unknown>) => void) | null = null
-  onerror: (() => void) | null = null
-  onclose: (() => void) | null = null
+  addTrack = vi.fn()
+  createOffer = vi.fn(async () => ({
+    type: 'offer' as const,
+    sdp: 'offer-sdp',
+  }))
+  setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => {
+    this.localDescription = description
+  })
+  setRemoteDescription = vi.fn(async (description: RTCSessionDescriptionInit) => {
+    this.remoteDescription = description
+    this.connectionState = 'connected'
+    this.onconnectionstatechange?.()
+  })
+  addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+    if (typeof listener !== 'function') return
+    const listeners = this.listeners.get(type) ?? new Set<EventListener>()
+    listeners.add(listener)
+    this.listeners.set(type, listeners)
+  })
+  removeEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+    if (typeof listener !== 'function') return
+    this.listeners.get(type)?.delete(listener)
+  })
+  close = vi.fn(() => {
+    this.connectionState = 'closed'
+  })
 
-  constructor(readonly url: string) {
-    FakeWebSocket.instances.push(this)
+  setIceGatheringState(state: RTCIceGatheringState) {
+    this.iceGatheringState = state
+    this.dispatch('icegatheringstatechange')
   }
 
-  send() {}
-
-  close() {
-    this.readyState = 3
+  setConnectionState(state: RTCPeerConnectionState) {
+    this.connectionState = state
+    this.onconnectionstatechange?.()
   }
 
-  error() {
-    this.onerror?.()
-  }
-
-  closeFromServer() {
-    this.readyState = 3
-    this.onclose?.()
+  private dispatch(type: string) {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(new Event(type))
+    }
   }
 }
 
-const audioContext = () =>
+const fakeTrack = (stop = vi.fn()) => ({ stop }) as unknown as MediaStreamTrack
+
+const fakeStream = (tracks: MediaStreamTrack[]) =>
   ({
-    state: 'running',
-    currentTime: 0,
-    close: vi.fn(),
-  }) as unknown as AudioContext
+    getTracks: () => tracks,
+    getAudioTracks: () => tracks,
+  }) as unknown as MediaStream
 
-const node = () => ({ connect: vi.fn(), disconnect: vi.fn() })
-
-const deferred = () => {
-  let resolve!: () => void
-  const promise = new Promise<void>((done) => {
+const deferredStream = () => {
+  let resolve!: (stream: MediaStream) => void
+  const promise = new Promise<MediaStream>((done) => {
     resolve = done
   })
   return { promise, resolve }
@@ -63,45 +82,20 @@ const deferred = () => {
 
 describe('call audio session', () => {
   beforeEach(() => {
+    vi.useRealTimers()
     vi.clearAllMocks()
-    FakeWebSocket.instances = []
-    vi.stubGlobal('WebSocket', FakeWebSocket)
+    createWebRTCAnswer.mockResolvedValue({
+      data: ref({ type: 'answer', sdp: 'answer-sdp' }),
+    })
   })
 
-  it('does not open media when no AMR codec factory is available', async () => {
-    const session = useCallAudioSession(ref('modem-1'))
-
-    await expect(session.start('call-1')).resolves.toBe(false)
-
-    expect(session.status.value).toBe('unsupported')
-    expect(session.errorMessage.value).toBe('AMR codec module is not available')
-    expect(session.mediaStatus.value).toBe('closed')
-  })
-
-  it('prepares microphone input without opening call media', async () => {
-    const stop = vi.fn()
-    const getUserMedia = vi.fn(
-      async () =>
-        ({
-          getTracks: () => [{ stop }],
-        }) as unknown as MediaStream,
-    )
-    let audioState: AudioContextState = 'suspended'
-    const audioContext = {
-      get state() {
-        return audioState
-      },
-      currentTime: 0,
-      resume: vi.fn(async () => {
-        audioState = 'running'
-      }),
-      close: vi.fn(),
-    } as unknown as AudioContext
+  it('prepares microphone input without opening WebRTC media', async () => {
+    const track = fakeTrack()
+    const getUserMedia = vi.fn(async () => fakeStream([track]))
     const session = useCallAudioSession(ref('modem-1'), {
-      codecFactory,
       deps: {
-        createAudioContext: () => audioContext,
         getUserMedia,
+        createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
       },
     })
 
@@ -109,244 +103,260 @@ describe('call audio session', () => {
 
     expect(getUserMedia).toHaveBeenCalledWith({
       audio: {
-        autoGainControl: true,
+        autoGainControl: false,
         channelCount: 1,
         echoCancellation: true,
         noiseSuppression: true,
+        sampleSize: 16,
       },
     })
+    expect(createWebRTCAnswer).not.toHaveBeenCalled()
     expect(session.status.value).toBe('idle')
-    expect(session.mediaStatus.value).toBe('idle')
   })
 
-  it('buffers remote PCM briefly before playback to absorb jitter', async () => {
-    const start = vi.fn()
-    const buffer = {
-      duration: 0.02,
-      copyToChannel: vi.fn(),
-    }
-    const audioContext = {
-      state: 'running',
-      currentTime: 10,
-      destination: node(),
-      close: vi.fn(),
-      createBuffer: vi.fn(() => buffer),
-      createBufferSource: vi.fn(() => ({
-        buffer: null,
-        connect: vi.fn(),
-        start,
-      })),
-      createGain: vi.fn(() => ({
-        ...node(),
-        gain: { value: 1 },
-      })),
-      createMediaStreamSource: vi.fn(() => node()),
-      createScriptProcessor: vi.fn(() => node()),
-    } as unknown as AudioContext
+  it('starts a WebRTC call audio session from a browser offer', async () => {
+    const pc = new FakePeerConnection()
+    const track = fakeTrack()
+    const stream = fakeStream([track])
+    const createPeerConnection = vi.fn(() => pc as unknown as RTCPeerConnection)
     const session = useCallAudioSession(ref('modem-1'), {
-      codecFactory,
       deps: {
-        createAudioContext: () => audioContext,
-        getUserMedia: vi.fn(
-          async () =>
-            ({
-              getTracks: () => [{ stop: vi.fn() }],
-            }) as unknown as MediaStream,
-        ),
+        getUserMedia: vi.fn(async () => stream),
+        createPeerConnection,
       },
     })
 
     await expect(session.start('call-1')).resolves.toBe(true)
-    const ws = FakeWebSocket.instances[0]
-    expect(ws).toBeDefined()
-    if (!ws) return
 
-    ws.onmessage?.({
-      data: JSON.stringify({
-        type: 'ready',
-        media: {
-          codec: 'PCMU',
-          payloadType: 0,
-          clockRate: 8000,
-          channels: 1,
-          octetAlign: false,
-          dtmfPayloadType: 101,
-          dtmfClockRate: 8000,
-          ptimeMillis: 20,
-        },
-      }),
-    } as MessageEvent<unknown>)
-    await nextTick()
-
-    ws.onmessage?.({
-      data: buildRtpPacket({
-        payloadType: 0,
-        sequenceNumber: 1,
-        timestamp: 160,
-        ssrc: 42,
-        marker: false,
-        payload: encodePCMU(new Float32Array(160)),
-      }).buffer,
-    } as MessageEvent<unknown>)
-    await Promise.resolve()
-    await Promise.resolve()
-
-    expect(start).toHaveBeenCalledWith(10.08)
+    expect(createPeerConnection).toHaveBeenCalledWith({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+      ],
+    })
+    expect(pc.addTrack).toHaveBeenCalledWith(track, stream)
+    expect(createWebRTCAnswer).toHaveBeenCalledWith('modem-1', 'call-1', {
+      type: 'offer',
+      sdp: 'offer-sdp',
+    })
+    expect(pc.setRemoteDescription).toHaveBeenCalledWith({
+      type: 'answer',
+      sdp: 'answer-sdp',
+    })
+    expect(session.status.value).toBe('ready')
   })
 
-  it('does not read a cleared audio context when unmounted during output resume', async () => {
-    const resume = deferred()
-    let audioState: AudioContextState = 'suspended'
-    const audioContext = {
-      get state() {
-        return audioState
-      },
-      currentTime: 0,
-      resume: vi.fn(async () => {
-        await resume.promise
-        audioState = 'running'
-      }),
-      close: vi.fn(),
-    } as unknown as AudioContext
-    let session!: ReturnType<typeof useCallAudioSession>
-    const wrapper = mount({
-      template: '<div />',
-      setup() {
-        session = useCallAudioSession(ref('modem-1'), {
-          codecFactory,
-          deps: {
-            createAudioContext: () => audioContext,
-            getUserMedia: vi.fn(),
-          },
-        })
-        return {}
+  it('reuses pending microphone preparation when a call starts', async () => {
+    const capture = deferredStream()
+    const pc = new FakePeerConnection()
+    const getUserMedia = vi.fn(() => capture.promise)
+    const createPeerConnection = vi.fn(() => pc as unknown as RTCPeerConnection)
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia,
+        createPeerConnection,
       },
     })
 
-    const prepare = session.prepare()
-    wrapper.unmount()
-    resume.resolve()
+    const prepared = session.prepare()
+    const started = session.start('call-1')
+    const track = fakeTrack()
+    const stream = fakeStream([track])
+    capture.resolve(stream)
 
-    await expect(prepare).resolves.toBe(false)
-    expect(session.status.value).toBe('closed')
-    expect(audioContext.close).toHaveBeenCalled()
+    await expect(prepared).resolves.toBe(true)
+    await expect(started).resolves.toBe(true)
+
+    expect(getUserMedia).toHaveBeenCalledOnce()
+    expect(pc.addTrack).toHaveBeenCalledWith(track, stream)
+    expect(session.status.value).toBe('ready')
   })
 
-  it('blocks call audio preparation when microphone capture is blocked', async () => {
-    const audioContext = {
-      state: 'running',
-      currentTime: 0,
-      close: vi.fn(),
-    } as unknown as AudioContext
+  it('stops captured microphone tracks when start is cancelled while capture is pending', async () => {
+    const capture = deferredStream()
+    const stop = vi.fn()
+    const createPeerConnection = vi.fn(
+      () => new FakePeerConnection() as unknown as RTCPeerConnection,
+    )
     const session = useCallAudioSession(ref('modem-1'), {
-      codecFactory,
       deps: {
-        createAudioContext: () => audioContext,
+        getUserMedia: vi.fn(() => capture.promise),
+        createPeerConnection,
+      },
+    })
+
+    const started = session.start('call-1')
+    session.stop()
+    capture.resolve(fakeStream([fakeTrack(stop)]))
+
+    await expect(started).resolves.toBe(false)
+    expect(stop).toHaveBeenCalled()
+    expect(createPeerConnection).not.toHaveBeenCalled()
+    expect(session.status.value).toBe('closed')
+  })
+
+  it('keeps a restarted session alive when earlier microphone capture was cancelled', async () => {
+    const capture = deferredStream()
+    const stop = vi.fn()
+    const pc = new FakePeerConnection()
+    const createPeerConnection = vi.fn(() => pc as unknown as RTCPeerConnection)
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia: vi.fn(() => capture.promise),
+        createPeerConnection,
+      },
+    })
+
+    const firstStart = session.start('call-1')
+    session.stop()
+    const secondStart = session.start('call-1')
+    capture.resolve(fakeStream([fakeTrack(stop)]))
+
+    await expect(firstStart).resolves.toBe(false)
+    await expect(secondStart).resolves.toBe(true)
+    expect(stop).not.toHaveBeenCalled()
+    expect(createPeerConnection).toHaveBeenCalledOnce()
+    expect(session.status.value).toBe('ready')
+  })
+
+  it('times out when ICE gathering does not complete', async () => {
+    vi.useFakeTimers()
+    const pc = new FakePeerConnection()
+    pc.iceGatheringState = 'gathering'
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia: vi.fn(async () => fakeStream([fakeTrack()])),
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+      },
+    })
+
+    const started = session.start('call-1')
+    await vi.advanceTimersByTimeAsync(20000)
+
+    await expect(started).resolves.toBe(false)
+    expect(createWebRTCAnswer).not.toHaveBeenCalled()
+    expect(pc.close).toHaveBeenCalled()
+    expect(session.status.value).toBe('error')
+    expect(session.errorMessage.value).toBe('WebRTC ICE candidates are missing')
+  })
+
+  it('starts with gathered candidates when ICE gathering does not complete before the timeout', async () => {
+    vi.useFakeTimers()
+    const pc = new FakePeerConnection()
+    pc.iceGatheringState = 'gathering'
+    pc.setLocalDescription.mockImplementation(async (description: RTCSessionDescriptionInit) => {
+      pc.localDescription = {
+        ...description,
+        sdp: `${description.sdp}\r\na=candidate:1 1 udp 2130706431 192.0.2.10 40000 typ host\r\n`,
+      }
+    })
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia: vi.fn(async () => fakeStream([fakeTrack()])),
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+      },
+    })
+
+    const started = session.start('call-1')
+    await vi.advanceTimersByTimeAsync(20000)
+
+    await expect(started).resolves.toBe(true)
+    expect(createWebRTCAnswer).toHaveBeenCalledWith('modem-1', 'call-1', {
+      type: 'offer',
+      sdp: 'offer-sdp\r\na=candidate:1 1 udp 2130706431 192.0.2.10 40000 typ host\r\n',
+    })
+    expect(session.status.value).toBe('ready')
+  })
+
+  it('keeps audio alive when a disconnected peer reconnects during the grace period', async () => {
+    vi.useFakeTimers()
+    const pc = new FakePeerConnection()
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia: vi.fn(async () => fakeStream([fakeTrack()])),
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+      },
+    })
+
+    await expect(session.start('call-1')).resolves.toBe(true)
+    pc.setConnectionState('disconnected')
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(session.status.value).toBe('ready')
+
+    pc.setConnectionState('connected')
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(session.status.value).toBe('ready')
+    expect(session.errorMessage.value).toBe('')
+  })
+
+  it('fails audio when a disconnected peer stays down past the grace period', async () => {
+    vi.useFakeTimers()
+    const pc = new FakePeerConnection()
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia: vi.fn(async () => fakeStream([fakeTrack()])),
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+      },
+    })
+
+    await expect(session.start('call-1')).resolves.toBe(true)
+    pc.setConnectionState('disconnected')
+    await vi.advanceTimersByTimeAsync(5000)
+
+    expect(session.status.value).toBe('error')
+    expect(session.errorMessage.value).toBe('Call audio connection failed')
+    expect(pc.close).toHaveBeenCalled()
+  })
+
+  it('publishes the remote stream from WebRTC ontrack', async () => {
+    const pc = new FakePeerConnection()
+    const remote = fakeStream([])
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia: vi.fn(async () => fakeStream([fakeTrack()])),
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+      },
+    })
+
+    await expect(session.start('call-1')).resolves.toBe(true)
+    pc.ontrack?.({ streams: [remote] } as unknown as RTCTrackEvent)
+
+    expect(session.remoteStream.value).toBe(remote)
+  })
+
+  it('stops local tracks and closes the peer connection', async () => {
+    const pc = new FakePeerConnection()
+    const stop = vi.fn()
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia: vi.fn(async () => fakeStream([fakeTrack(stop)])),
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+      },
+    })
+
+    await expect(session.start('call-1')).resolves.toBe(true)
+    session.stop()
+
+    expect(pc.close).toHaveBeenCalled()
+    expect(stop).toHaveBeenCalled()
+    expect(session.status.value).toBe('closed')
+    expect(session.remoteStream.value).toBeNull()
+  })
+
+  it('surfaces microphone capture failures', async () => {
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
         getUserMedia: vi.fn(async () => {
-          throw new Error('Audio Capture is not available')
+          throw new Error('Audio capture is blocked')
         }),
+        createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
       },
     })
 
     await expect(session.prepare()).resolves.toBe(false)
 
     expect(session.status.value).toBe('error')
-    expect(session.mediaStatus.value).toBe('closed')
-    expect(session.errorMessage.value).toBe('Audio Capture is not available')
-  })
-
-  it('does not open call media when microphone capture is blocked', async () => {
-    const session = useCallAudioSession(ref('modem-1'), {
-      codecFactory,
-      deps: {
-        createAudioContext: audioContext,
-        getUserMedia: vi.fn(async () => {
-          throw new Error('Audio Capture is not available')
-        }),
-      },
-    })
-
-    await expect(session.start('call-1')).resolves.toBe(false)
-
-    expect(session.status.value).toBe('error')
-    expect(session.mediaStatus.value).toBe('closed')
-    expect(FakeWebSocket.instances).toHaveLength(0)
-  })
-
-  it('surfaces media websocket failures while starting call audio', async () => {
-    const stop = vi.fn()
-    const session = useCallAudioSession(ref('modem-1'), {
-      codecFactory,
-      deps: {
-        createAudioContext: audioContext,
-        getUserMedia: vi.fn(
-          async () =>
-            ({
-              getTracks: () => [{ stop }],
-            }) as unknown as MediaStream,
-        ),
-      },
-    })
-
-    await expect(session.start('call-1')).resolves.toBe(true)
-    expect(session.status.value).toBe('connecting')
-
-    FakeWebSocket.instances[0]?.error()
-    await nextTick()
-
-    expect(session.status.value).toBe('error')
-    expect(session.errorMessage.value).toBe('Call media connection failed')
-    expect(stop).toHaveBeenCalled()
-  })
-
-  it('clears stale media errors when call audio is stopped', async () => {
-    const stop = vi.fn()
-    const session = useCallAudioSession(ref('modem-1'), {
-      codecFactory,
-      deps: {
-        createAudioContext: audioContext,
-        getUserMedia: vi.fn(
-          async () =>
-            ({
-              getTracks: () => [{ stop }],
-            }) as unknown as MediaStream,
-        ),
-      },
-    })
-
-    await expect(session.start('call-1')).resolves.toBe(true)
-    FakeWebSocket.instances[0]?.error()
-    await nextTick()
-    expect(session.errorMessage.value).toBe('Call media connection failed')
-
-    session.stop()
-
-    expect(session.status.value).toBe('closed')
-    expect(session.errorMessage.value).toBe('')
-  })
-
-  it('closes call audio when the media websocket closes before the handshake', async () => {
-    const stop = vi.fn()
-    const session = useCallAudioSession(ref('modem-1'), {
-      codecFactory,
-      deps: {
-        createAudioContext: audioContext,
-        getUserMedia: vi.fn(
-          async () =>
-            ({
-              getTracks: () => [{ stop }],
-            }) as unknown as MediaStream,
-        ),
-      },
-    })
-
-    await expect(session.start('call-1')).resolves.toBe(true)
-
-    FakeWebSocket.instances[0]?.closeFromServer()
-    await nextTick()
-
-    expect(session.status.value).toBe('closed')
-    expect(session.errorMessage.value).toBe('')
-    expect(stop).toHaveBeenCalled()
+    expect(session.errorMessage.value).toBe('Audio capture is blocked')
   })
 })

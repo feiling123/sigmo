@@ -546,11 +546,20 @@ func (fakeWiFiCalling) UpdateSettings(context.Context, *mmodem.Modem, wificallin
 func (f fakeWiFiCalling) Status(context.Context, *mmodem.Modem) (wificalling.Status, error) {
 	return f.status, nil
 }
+func (fakeWiFiCalling) EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool {
+	return false
+}
 func (fakeWiFiCalling) StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error) {
+	return websheet.Info{}, nil
+}
+func (fakeWiFiCalling) StartEmergencyAddressUpdate(context.Context, *mmodem.Modem) (websheet.Info, error) {
 	return websheet.Info{}, nil
 }
 func (fakeWiFiCalling) SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error) {
 	return storage.Message{}, nil
+}
+func (fakeWiFiCalling) ApplyPendingSMSStatus(context.Context, storage.Message) error {
+	return nil
 }
 func (fakeWiFiCalling) ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error) {
 	return "", nil

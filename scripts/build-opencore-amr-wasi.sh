@@ -7,12 +7,10 @@ VO_AMRWBENC_VERSION="${VO_AMRWBENC_VERSION:-0.1.3}"
 OPENCORE_AMR_URL="${OPENCORE_AMR_URL:-https://sourceforge.net/projects/opencore-amr/files/opencore-amr/opencore-amr-${OPENCORE_AMR_VERSION}.tar.gz/download}"
 VO_AMRWBENC_URL="${VO_AMRWBENC_URL:-https://sourceforge.net/projects/opencore-amr/files/vo-amrwbenc/vo-amrwbenc-${VO_AMRWBENC_VERSION}.tar.gz/download}"
 
-OUTPUT_BASENAME="${OUTPUT_BASENAME:-opencore-amr}"
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 refs_dir="${repo_root}/refs"
-out_dir="${repo_root}/web/src/assets/codecs"
-em_cache_dir="${EM_CACHE:-${repo_root}/.cache/emscripten}"
+out_dir="${repo_root}/internal/pkg/voicecodec/assets"
+out_wasm="${out_dir}/opencore-amr.wasm"
 
 opencore_archive="${refs_dir}/opencore-amr-${OPENCORE_AMR_VERSION}.tar.gz"
 vo_archive="${refs_dir}/vo-amrwbenc-${VO_AMRWBENC_VERSION}.tar.gz"
@@ -45,33 +43,37 @@ append_find() {
 }
 
 require_tool curl
+require_tool tar
 
-EMXX="${EMXX:-}"
-if [[ -z "${EMXX}" ]]; then
-  if command -v em++ >/dev/null 2>&1; then
-    EMXX="$(command -v em++)"
-  elif [[ -x /usr/lib/emscripten/em++ ]]; then
-    EMXX="/usr/lib/emscripten/em++"
-  else
-    echo "missing required tool: em++" >&2
-    exit 1
-  fi
+CC="${CC:-clang}"
+CXX="${CXX:-clang++}"
+require_tool "${CC}"
+require_tool "${CXX}"
+
+WASI_TARGET="${WASI_TARGET:-wasm32-wasip1}"
+WASI_SYSROOT="${WASI_SYSROOT:-}"
+wasi_sysroot_has_headers() {
+  local sysroot="$1"
+  [[ -f "${sysroot}/include/stdlib.h" ]] ||
+    [[ -f "${sysroot}/include/${WASI_TARGET}/stdlib.h" ]] ||
+    [[ -f "${sysroot}/include/wasm32-wasi/stdlib.h" ]]
+}
+
+if [[ -z "${WASI_SYSROOT}" ]]; then
+  for candidate in \
+    /opt/wasi-sdk/share/wasi-sysroot \
+    /usr/share/wasi-sysroot \
+    /usr/local/share/wasi-sysroot; do
+    if wasi_sysroot_has_headers "${candidate}"; then
+      WASI_SYSROOT="${candidate}"
+      break
+    fi
+  done
 fi
-
-EMCC="${EMCC:-}"
-if [[ -z "${EMCC}" ]]; then
-  if command -v emcc >/dev/null 2>&1; then
-    EMCC="$(command -v emcc)"
-  elif [[ -x /usr/lib/emscripten/emcc ]]; then
-    EMCC="/usr/lib/emscripten/emcc"
-  else
-    echo "missing required tool: emcc" >&2
-    exit 1
-  fi
+if [[ -z "${WASI_SYSROOT}" ]] || ! wasi_sysroot_has_headers "${WASI_SYSROOT}"; then
+  echo "missing WASI sysroot; install wasi-sdk or set WASI_SYSROOT" >&2
+  exit 1
 fi
-
-mkdir -p "${em_cache_dir}"
-export EM_CACHE="${em_cache_dir}"
 
 fetch_archive "${OPENCORE_AMR_URL}" "${opencore_archive}"
 fetch_archive "${VO_AMRWBENC_URL}" "${vo_archive}"
@@ -85,7 +87,7 @@ tar -xzf "${vo_archive}" -C "${work_dir}"
 opencore_dir="${work_dir}/opencore-amr-${OPENCORE_AMR_VERSION}"
 vo_dir="${work_dir}/vo-amrwbenc-${VO_AMRWBENC_VERSION}"
 
-bridge="${work_dir}/sigmo_amr_wasm_bridge.cpp"
+bridge="${work_dir}/sigmo_amr_wasi_bridge.cpp"
 cat >"${bridge}" <<'CPP'
 #include "interf_dec.h"
 #include "interf_enc.h"
@@ -94,50 +96,24 @@ cat >"${bridge}" <<'CPP'
 
 extern "C" {
 
-void* sigmo_amrnb_decoder_create() {
-    return Decoder_Interface_init();
-}
-
-void sigmo_amrnb_decoder_destroy(void* state) {
-    Decoder_Interface_exit(state);
-}
-
+void* sigmo_amrnb_decoder_create() { return Decoder_Interface_init(); }
+void sigmo_amrnb_decoder_destroy(void* state) { Decoder_Interface_exit(state); }
 void sigmo_amrnb_decode(void* state, const unsigned char* frame, short* pcm, int bfi) {
     Decoder_Interface_Decode(state, frame, pcm, bfi);
 }
-
-void* sigmo_amrnb_encoder_create(int dtx) {
-    return Encoder_Interface_init(dtx);
-}
-
-void sigmo_amrnb_encoder_destroy(void* state) {
-    Encoder_Interface_exit(state);
-}
-
+void* sigmo_amrnb_encoder_create(int dtx) { return Encoder_Interface_init(dtx); }
+void sigmo_amrnb_encoder_destroy(void* state) { Encoder_Interface_exit(state); }
 int sigmo_amrnb_encode(void* state, int mode, const short* pcm, unsigned char* out) {
     return Encoder_Interface_Encode(state, static_cast<Mode>(mode), pcm, out, 0);
 }
 
-void* sigmo_amrwb_decoder_create() {
-    return D_IF_init();
-}
-
-void sigmo_amrwb_decoder_destroy(void* state) {
-    D_IF_exit(state);
-}
-
+void* sigmo_amrwb_decoder_create() { return D_IF_init(); }
+void sigmo_amrwb_decoder_destroy(void* state) { D_IF_exit(state); }
 void sigmo_amrwb_decode(void* state, const unsigned char* frame, short* pcm, int bfi) {
     D_IF_decode(state, frame, pcm, bfi);
 }
-
-void* sigmo_amrwb_encoder_create() {
-    return E_IF_init();
-}
-
-void sigmo_amrwb_encoder_destroy(void* state) {
-    E_IF_exit(state);
-}
-
+void* sigmo_amrwb_encoder_create() { return E_IF_init(); }
+void sigmo_amrwb_encoder_destroy(void* state) { E_IF_exit(state); }
 int sigmo_amrwb_encode(void* state, int mode, const short* pcm, unsigned char* out, int dtx) {
     return E_IF_encode(state, mode, pcm, out, dtx);
 }
@@ -173,7 +149,6 @@ append_find opencore_sources "${amrnb_base}/common/src" -maxdepth 1 -type f -nam
 amrwb_dec_src="${opencore_dir}/opencore/codecs_v2/audio/gsm_amr/amr_wb/dec/src"
 append_find opencore_sources "${amrwb_dec_src}" -maxdepth 1 -type f -name '*.cpp' \
   ! -name 'decoder_amr_wb.cpp'
-
 append_find vo_sources "${vo_dir}/amrwbenc/src" -maxdepth 1 -type f -name '*.c'
 
 opencore_include_flags=(
@@ -189,14 +164,16 @@ opencore_include_flags=(
   "-I${opencore_dir}/opencore/codecs_v2/audio/gsm_amr/amr_wb/dec/src"
   "-I${opencore_dir}/opencore/codecs_v2/audio/gsm_amr/amr_wb/dec/include"
 )
-
 vo_include_flags=(
   "-I${vo_dir}"
   "-I${vo_dir}/amrwbenc/inc"
   "-I${vo_dir}/common/include"
 )
-
 bridge_include_flags=("${opencore_include_flags[@]}" "${vo_include_flags[@]}")
+
+object_dir="${work_dir}/objects"
+mkdir -p "${object_dir}" "${out_dir}"
+objects=()
 
 compile_group() {
   local compiler="$1"
@@ -208,7 +185,7 @@ compile_group() {
   local source
   for source in "${source_group[@]}"; do
     local object="${object_dir}/${label}_${index}.o"
-    "${compiler}" "${source}" \
+    "${compiler}" --target="${WASI_TARGET}" --sysroot="${WASI_SYSROOT}" "${source}" \
       "${flag_group[@]}" \
       "${standard}" \
       -O3 \
@@ -221,28 +198,31 @@ compile_group() {
   done
 }
 
-mkdir -p "${out_dir}"
-object_dir="${work_dir}/objects"
-mkdir -p "${object_dir}"
-objects=()
+compile_group "${CXX}" bridge "-std=gnu++14" bridge_sources bridge_include_flags
+compile_group "${CXX}" opencore "-std=gnu++14" opencore_sources opencore_include_flags
+compile_group "${CC}" vo "-std=c99" vo_sources vo_include_flags
 
-compile_group "${EMXX}" bridge "-std=gnu++14" bridge_sources bridge_include_flags
-compile_group "${EMXX}" opencore "-std=gnu++14" opencore_sources opencore_include_flags
-compile_group "${EMCC}" vo "-std=c99" vo_sources vo_include_flags
-
-"${EMXX}" "${objects[@]}" \
+"${CC}" --target="${WASI_TARGET}" --sysroot="${WASI_SYSROOT}" "${objects[@]}" \
   -O3 \
   -flto \
-  -fno-exceptions \
-  -fno-rtti \
-  -sMODULARIZE=1 \
-  -sEXPORT_ES6=1 \
-  -sENVIRONMENT=web,worker \
-  -sALLOW_MEMORY_GROWTH=1 \
-  -sFILESYSTEM=0 \
-  -sEXPORTED_FUNCTIONS='["_malloc","_free","_sigmo_amrnb_decoder_create","_sigmo_amrnb_decoder_destroy","_sigmo_amrnb_decode","_sigmo_amrnb_encoder_create","_sigmo_amrnb_encoder_destroy","_sigmo_amrnb_encode","_sigmo_amrwb_decoder_create","_sigmo_amrwb_decoder_destroy","_sigmo_amrwb_decode","_sigmo_amrwb_encoder_create","_sigmo_amrwb_encoder_destroy","_sigmo_amrwb_encode"]' \
-  -sEXPORTED_RUNTIME_METHODS='["HEAPU8","HEAP16"]' \
-  -o "${out_dir}/${OUTPUT_BASENAME}.js"
+  -nostartfiles \
+  -Wl,--no-entry \
+  -Wl,--export=malloc \
+  -Wl,--export=free \
+  -Wl,--export=sigmo_amrnb_decoder_create \
+  -Wl,--export=sigmo_amrnb_decoder_destroy \
+  -Wl,--export=sigmo_amrnb_decode \
+  -Wl,--export=sigmo_amrnb_encoder_create \
+  -Wl,--export=sigmo_amrnb_encoder_destroy \
+  -Wl,--export=sigmo_amrnb_encode \
+  -Wl,--export=sigmo_amrwb_decoder_create \
+  -Wl,--export=sigmo_amrwb_decoder_destroy \
+  -Wl,--export=sigmo_amrwb_decode \
+  -Wl,--export=sigmo_amrwb_encoder_create \
+  -Wl,--export=sigmo_amrwb_encoder_destroy \
+  -Wl,--export=sigmo_amrwb_encode \
+  -Wl,--export-memory \
+  -o "${out_wasm}"
 
-echo "built ${out_dir}/${OUTPUT_BASENAME}.js"
-echo "built ${out_dir}/${OUTPUT_BASENAME}.wasm"
+chmod 0644 "${out_wasm}"
+echo "built ${out_wasm}"

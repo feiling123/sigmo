@@ -1,325 +1,222 @@
-import { computed, getCurrentInstance, onBeforeUnmount, ref, watch, type Ref } from 'vue'
+import { computed, getCurrentInstance, onBeforeUnmount, ref, shallowRef, type Ref } from 'vue'
 
-import { useCallMediaSession } from '@/composables/useCallMediaSession'
-import { CallMediaPipeline, type AmrCodecAdapter, type PcmFrame } from '@/lib/callMediaPipeline'
-import type { CallMediaInfo } from '@/types/call'
+import { useCallApi } from '@/apis/call'
 
-type AudioStatus =
-  | 'idle'
-  | 'preparing'
-  | 'connecting'
-  | 'ready'
-  | 'unsupported'
-  | 'closed'
-  | 'error'
-
-type CodecFactory = (media: CallMediaInfo) => AmrCodecAdapter | Promise<AmrCodecAdapter>
+type AudioStatus = 'idle' | 'preparing' | 'connecting' | 'ready' | 'closed' | 'error'
 
 type AudioDeps = {
-  createAudioContext?: () => AudioContext
+  createPeerConnection?: (configuration: RTCConfiguration) => RTCPeerConnection
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>
-  micWorkletUrl?: URL
 }
 
 type Options = {
-  codecFactory?: CodecFactory
   deps?: AudioDeps
 }
 
 const microphoneConstraints: MediaTrackConstraints = {
-  autoGainControl: true,
+  autoGainControl: false,
   channelCount: 1,
   echoCancellation: true,
   noiseSuppression: true,
+  sampleSize: 16,
 }
 
-const defaultRemotePlaybackDelaySeconds = 0.08
+const iceGatheringTimeoutMs = 20000
+const disconnectedGraceMs = 5000
 
 export const useCallAudioSession = (modemId: Ref<string>, options: Options = {}) => {
   const status = ref<AudioStatus>('idle')
+  const mediaStatus = computed(() => status.value)
   const errorMessage = ref('')
-  const activeCallID = ref('')
+  const remoteStream = shallowRef<MediaStream | null>(null)
 
-  let audioContext: AudioContext | null = null
+  const calls = useCallApi()
+
+  let pc: RTCPeerConnection | null = null
   let stream: MediaStream | null = null
-  let sourceNode: MediaStreamAudioSourceNode | null = null
-  let processorNode: AudioNode | null = null
-  let muteNode: GainNode | null = null
-  let pipeline: CallMediaPipeline | null = null
-  let nextPlaybackTime = 0
-  let remotePlaybackStarted = false
-  let inputPromise: Promise<boolean> | null = null
-
-  const media = useCallMediaSession(modemId, {
-    onRtpPacket: (packet) => {
-      if (!pipeline) return
-      void pipeline.receiveRtpPacket(packet).catch((err: unknown) => {
-        fail(err, 'Receive call audio failed')
-      })
-    },
-  })
+  let inputPromise: Promise<MediaStream> | null = null
+  let preparePromise: Promise<boolean> | null = null
+  let sessionAbort: AbortController | null = null
+  let connectionLossTimer: ReturnType<typeof setTimeout> | null = null
+  let activeCallID = ''
 
   const isReady = computed(() => status.value === 'ready')
-  const mediaStatus = computed(() => media.status.value)
 
-  const fail = (err: unknown, fallback: string) => {
-    errorMessage.value = err instanceof Error ? err.message : fallback
+  const fail = (err: unknown) => {
+    errorMessage.value = errorText(err)
     status.value = 'error'
     cleanup()
   }
 
-  const captureUnavailable = (err: unknown) => {
-    errorMessage.value = err instanceof Error ? err.message : 'Microphone capture is not available'
-    status.value = 'error'
-    cleanup()
-  }
+  const isCurrentSession = (controller: AbortController) =>
+    sessionAbort === controller && !controller.signal.aborted
 
-  const playPcm = (frame: PcmFrame) => {
-    if (!audioContext || frame.samples.length === 0) return
-    const buffer = audioContext.createBuffer(1, frame.samples.length, frame.sampleRate)
-    buffer.copyToChannel(new Float32Array(frame.samples), 0)
-    const source = audioContext.createBufferSource()
-    source.buffer = buffer
-    source.connect(audioContext.destination)
-    if (!remotePlaybackStarted || nextPlaybackTime <= audioContext.currentTime) {
-      nextPlaybackTime =
-        audioContext.currentTime + (frame.playbackDelaySeconds ?? defaultRemotePlaybackDelaySeconds)
-      remotePlaybackStarted = true
-    }
-    const startAt = nextPlaybackTime
-    source.start(startAt)
-    nextPlaybackTime = startAt + buffer.duration
-  }
-
-  const sendMicPcm = (samples: Float32Array<ArrayBufferLike>, sampleRate: number) => {
-    const copy = new Float32Array(samples.length)
-    copy.set(samples)
-    void pipeline?.sendPcm(copy, sampleRate).catch((err: unknown) => {
-      fail(err, 'Send call audio failed')
-    })
-  }
-
-  const createAudioContext = () => options.deps?.createAudioContext?.() ?? new AudioContext()
-
-  const ensureAudioOutput = async () => {
-    const ctx = audioContext ?? createAudioContext()
-    audioContext = ctx
-    if (ctx.state === 'suspended') {
-      await ctx.resume()
-    }
-    if (audioContext !== ctx) return false
-    nextPlaybackTime = ctx.currentTime
-    return true
-  }
-
-  const ensureAudioInput = async () => {
-    if (stream) return true
-    if (inputPromise) {
-      await inputPromise
-      return Boolean(stream)
-    }
+  const openAudioInput = async () => {
+    if (stream) return stream
+    if (inputPromise) return await inputPromise
     inputPromise = (async () => {
-      const ctx = audioContext ?? createAudioContext()
-      audioContext = ctx
-      if (ctx.state === 'suspended') {
-        await ctx.resume()
+      const getUserMedia =
+        options.deps?.getUserMedia ??
+        navigator.mediaDevices?.getUserMedia.bind(navigator.mediaDevices)
+      if (!getUserMedia) {
+        throw new Error('Microphone capture is not available')
       }
-      if (audioContext !== ctx) return false
-      if (!stream) {
-        const getUserMedia =
-          options.deps?.getUserMedia ??
-          navigator.mediaDevices?.getUserMedia.bind(navigator.mediaDevices)
-        if (!getUserMedia) {
-          throw new Error('Microphone capture is not available')
-        }
-        const nextStream = await getUserMedia({ audio: microphoneConstraints })
-        if (audioContext !== ctx) {
-          for (const track of nextStream.getTracks()) {
-            track.stop()
-          }
-          return false
-        }
-        stream = nextStream
-      }
-      if (audioContext !== ctx) return false
-      nextPlaybackTime = ctx.currentTime
-      return true
+      const nextStream = await getUserMedia({ audio: microphoneConstraints })
+      stream = nextStream
+      return nextStream
     })()
     try {
       return await inputPromise
-    } catch (err) {
-      captureUnavailable(err)
-      return false
     } finally {
       inputPromise = null
     }
   }
 
-  const connectMicrophone = async () => {
-    if (!audioContext || !stream || !pipeline) return
-    try {
-      sourceNode = audioContext.createMediaStreamSource(stream)
-      muteNode = audioContext.createGain()
-      muteNode.gain.value = 0
-
-      processorNode = await createMicProcessor(
-        audioContext,
-        (samples) => {
-          sendMicPcm(samples, audioContext?.sampleRate ?? 48000)
-        },
-        options.deps?.micWorkletUrl,
-      )
-
-      if ('onaudioprocess' in processorNode) {
-        processorNode.onaudioprocess = (event: AudioProcessingEvent) => {
-          sendMicPcm(event.inputBuffer.getChannelData(0), frameSampleRate(event))
-        }
+  const ensureAudioInput = async (controller: AbortController) => {
+    const signal = controller.signal
+    if (signal.aborted) throw newAbortError()
+    const currentStream = await openAudioInput()
+    if (signal.aborted) {
+      if (stream === currentStream && (sessionAbort === controller || sessionAbort === null)) {
+        stopStream(currentStream)
+        stream = null
       }
-
-      sourceNode.connect(processorNode)
-      processorNode.connect(muteNode)
-      muteNode.connect(audioContext.destination)
-    } catch (err) {
-      captureUnavailable(err)
-      disconnectNode(sourceNode)
-      disconnectNode(processorNode)
-      disconnectNode(muteNode)
-      sourceNode = null
-      processorNode = null
-      muteNode = null
+      throw newAbortError()
     }
+    return currentStream
   }
 
-  const attachPipeline = async (info: CallMediaInfo) => {
-    if (!options.codecFactory || !audioContext || !activeCallID.value || pipeline) return
-    const callID = activeCallID.value
-    try {
-      const codec = await options.codecFactory(info)
-      if (activeCallID.value !== callID) {
-        await codec.close?.()
-        return
+  const createPeerConnection = (configuration: RTCConfiguration) =>
+    options.deps?.createPeerConnection?.(configuration) ?? new RTCPeerConnection(configuration)
+
+  const clearConnectionLossTimer = () => {
+    if (!connectionLossTimer) return
+    clearTimeout(connectionLossTimer)
+    connectionLossTimer = null
+  }
+
+  const prepare = async () => {
+    if (preparePromise) return await preparePromise
+    errorMessage.value = ''
+    status.value = 'preparing'
+    preparePromise = (async () => {
+      try {
+        await openAudioInput()
+        if (!activeCallID && status.value === 'preparing') {
+          status.value = 'idle'
+        }
+        return true
+      } catch (err) {
+        fail(err)
+        return false
+      } finally {
+        preparePromise = null
       }
-      pipeline = new CallMediaPipeline({
-        media: info,
-        codec,
-        onRemotePcm: playPcm,
-        sendRtpPacket: media.sendRtpPacket,
-      })
-      await connectMicrophone()
-      status.value = 'ready'
-    } catch (err) {
-      fail(err, 'Start call audio failed')
-    }
+    })()
+    return await preparePromise
   }
 
   const start = async (callID: string) => {
     if (!callID) return false
     cleanup(true)
-    activeCallID.value = callID
+    const nextAbort = new AbortController()
+    sessionAbort = nextAbort
+    activeCallID = callID
     errorMessage.value = ''
-
-    if (!options.codecFactory) {
-      status.value = 'unsupported'
-      errorMessage.value = 'AMR codec module is not available'
-      return false
-    }
-
     status.value = 'preparing'
+
     try {
-      if (!(await ensureAudioOutput())) return false
-      if (!(await ensureAudioInput())) {
-        if (activeCallID.value === callID) {
-          activeCallID.value = ''
-        }
-        return false
-      }
-      if (activeCallID.value !== callID) {
-        return false
-      }
+      const localStream = await ensureAudioInput(nextAbort)
+      if (!isCurrentSession(nextAbort)) return false
       status.value = 'connecting'
-      media.connect(callID)
-      if (media.mediaInfo.value) {
-        void attachPipeline(media.mediaInfo.value)
+      const nextPC = createPeerConnection({ iceServers: defaultIceServers })
+      pc = nextPC
+      nextPC.ontrack = (event) => {
+        remoteStream.value = event.streams[0] ?? new MediaStream([event.track])
+      }
+      nextPC.onconnectionstatechange = () => {
+        if (pc !== nextPC) return
+        switch (nextPC.connectionState) {
+          case 'connected':
+            clearConnectionLossTimer()
+            status.value = 'ready'
+            break
+          case 'failed':
+            clearConnectionLossTimer()
+            fail(new Error('Call audio connection failed'))
+            break
+          case 'disconnected':
+            if (connectionLossTimer) return
+            connectionLossTimer = setTimeout(() => {
+              connectionLossTimer = null
+              if (pc === nextPC && nextPC.connectionState === 'disconnected') {
+                fail(new Error('Call audio connection failed'))
+              }
+            }, disconnectedGraceMs)
+            break
+          case 'closed':
+            clearConnectionLossTimer()
+            status.value = status.value === 'error' ? 'error' : 'closed'
+            break
+        }
+      }
+      for (const track of localStream.getAudioTracks()) {
+        nextPC.addTrack(track, localStream)
+      }
+      const offer = await nextPC.createOffer()
+      if (!isCurrentSession(nextAbort)) return false
+      await nextPC.setLocalDescription(offer)
+      if (!isCurrentSession(nextAbort)) return false
+      await waitForIceGathering(nextPC, nextAbort.signal)
+      if (pc !== nextPC || !isCurrentSession(nextAbort)) return false
+      const localDescription = nextPC.localDescription
+      if (!localDescription) {
+        throw new Error('WebRTC offer is missing a local description')
+      }
+      const { data } = await calls.createWebRTCAnswer(modemId.value, callID, {
+        type: 'offer',
+        sdp: localDescription.sdp,
+      })
+      const answer = data.value
+      if (!answer) {
+        throw new Error('Call audio answer is empty')
+      }
+      if (!isCurrentSession(nextAbort)) return false
+      await nextPC.setRemoteDescription(answer)
+      if (pc === nextPC && status.value === 'connecting') {
+        status.value = 'ready'
       }
       return true
     } catch (err) {
-      fail(err, 'Start call audio failed')
-      return false
-    }
-  }
-
-  const prepare = async () => {
-    errorMessage.value = ''
-    if (!options.codecFactory) {
-      status.value = 'unsupported'
-      errorMessage.value = 'AMR codec module is not available'
-      return false
-    }
-    status.value = 'preparing'
-    try {
-      if (!(await ensureAudioOutput())) return false
-      if (!(await ensureAudioInput())) {
-        return false
-      }
-      if (!activeCallID.value && status.value === 'preparing') {
-        status.value = 'idle'
-      }
-      return true
-    } catch (err) {
-      fail(err, 'Prepare call audio failed')
+      if (isAbortError(err)) return false
+      fail(err)
       return false
     }
   }
 
   const cleanup = (keepInput = false) => {
-    pipeline?.close()
-    pipeline = null
-    disconnectNode(sourceNode)
-    disconnectNode(processorNode)
-    disconnectNode(muteNode)
-    sourceNode = null
-    processorNode = null
-    muteNode = null
+    sessionAbort?.abort()
+    sessionAbort = null
+    clearConnectionLossTimer()
+    if (pc) {
+      pc.ontrack = null
+      pc.onconnectionstatechange = null
+      pc.close()
+      pc = null
+    }
+    remoteStream.value = null
     if (!keepInput && stream) {
-      for (const track of stream.getTracks()) {
-        track.stop()
-      }
+      stopStream(stream)
       stream = null
     }
-    if (!keepInput && audioContext) {
-      void audioContext.close()
-      audioContext = null
-    }
-    media.disconnect()
-    remotePlaybackStarted = false
-    nextPlaybackTime = 0
   }
 
   const stop = () => {
     cleanup()
-    activeCallID.value = ''
+    activeCallID = ''
     errorMessage.value = ''
     status.value = 'closed'
   }
-
-  watch(media.mediaInfo, (info) => {
-    if (!info || status.value !== 'connecting') return
-    void attachPipeline(info)
-  })
-
-  watch(media.status, (next) => {
-    if (!activeCallID.value || (status.value !== 'connecting' && status.value !== 'ready')) return
-    if (next === 'error') {
-      errorMessage.value = media.errorMessage.value || 'Call media connection failed'
-      status.value = 'error'
-      cleanup()
-      return
-    }
-    if (next === 'closed') {
-      status.value = 'closed'
-      cleanup()
-    }
-  })
 
   if (getCurrentInstance()) {
     onBeforeUnmount(stop)
@@ -330,51 +227,72 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     mediaStatus,
     isReady,
     errorMessage,
+    remoteStream,
     prepare,
     start,
     stop,
   }
 }
 
-const frameSampleRate = (event: AudioProcessingEvent) => event.inputBuffer.sampleRate
+const errorText = (err: unknown) => {
+  if (err instanceof Error && err.message.trim()) return err.message
+  if (typeof err === 'string' && err.trim()) return err
+  return 'Call audio is not available'
+}
 
-const createMicProcessor = async (
-  audioContext: AudioContext,
-  onPcm: (samples: Float32Array<ArrayBufferLike>) => void,
-  workletUrl = new URL('../worklets/callMicProcessor.js', import.meta.url),
-) => {
-  if (audioContext.audioWorklet && typeof AudioWorkletNode !== 'undefined') {
-    try {
-      await audioContext.audioWorklet.addModule(workletUrl)
-      const node = new AudioWorkletNode(audioContext, 'sigmo-call-mic', {
-        numberOfInputs: 1,
-        numberOfOutputs: 1,
-        outputChannelCount: [1],
-      })
-      node.port.onmessage = (
-        event: MessageEvent<{ type: string; samples?: Float32Array<ArrayBufferLike> }>,
-      ) => {
-        if (event.data.type === 'pcm' && event.data.samples) {
-          onPcm(event.data.samples)
-        }
+const stopStream = (stream: MediaStream) => {
+  for (const track of stream.getTracks()) {
+    track.stop()
+  }
+}
+
+const defaultIceServers: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+]
+
+const waitForIceGathering = (pc: RTCPeerConnection, signal: AbortSignal) => {
+  if (signal.aborted) {
+    return Promise.reject(newAbortError())
+  }
+  if (pc.iceGatheringState === 'complete') {
+    return Promise.resolve()
+  }
+  return new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup()
+      const sdp = pc.localDescription?.sdp ?? ''
+      if (hasIceCandidate(sdp)) {
+        resolve()
+        return
       }
-      return node
-    } catch (err) {
-      console.warn(
-        '[useCallAudioSession] AudioWorklet unavailable, falling back to ScriptProcessor',
-        err,
-      )
+      reject(new Error('WebRTC ICE candidates are missing'))
+    }, iceGatheringTimeoutMs)
+    const abort = () => {
+      cleanup()
+      reject(newAbortError())
     }
-  }
-
-  return audioContext.createScriptProcessor(2048, 1, 1)
+    const done = () => {
+      if (pc.iceGatheringState !== 'complete') return
+      cleanup()
+      resolve()
+    }
+    const cleanup = () => {
+      clearTimeout(timeout)
+      pc.removeEventListener('icegatheringstatechange', done)
+      signal.removeEventListener('abort', abort)
+    }
+    pc.addEventListener('icegatheringstatechange', done)
+    signal.addEventListener('abort', abort, { once: true })
+  })
 }
 
-const disconnectNode = (node: AudioNode | null) => {
-  if (!node) return
-  try {
-    node.disconnect()
-  } catch {
-    // Some browsers throw when a node was already disconnected.
-  }
+const newAbortError = () => {
+  const err = new Error('WebRTC audio session was cancelled')
+  err.name = 'AbortError'
+  return err
 }
+
+const hasIceCandidate = (sdp: string) => /^a=candidate:/m.test(sdp)
+
+const isAbortError = (err: unknown) => err instanceof Error && err.name === 'AbortError'

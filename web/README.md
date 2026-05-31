@@ -29,60 +29,25 @@ See [Vite Configuration Reference](https://vite.dev/config/).
 bun install
 ```
 
-## Voice Media Codec
+## Voice Media
 
-Sigmo forwards IMS RTP media to the browser. Browsers do not provide native
-AMR/AMR-WB voice codecs, so Sigmo includes a browser codec adapter in
-`src/lib/builtInAmrCodec.ts`.
-
-The built-in codec supports full-duplex AMR-NB and AMR-WB calls through a
-single OpenCORE AMR WebAssembly module:
-
-- AMR-NB decode/encode: OpenCORE AMR
-- AMR-WB decode: OpenCORE AMR
-- AMR-WB encode: VisualOn `vo-amrwbenc`
-
-Build the WASM module after installing Emscripten:
+Sigmo uses browser WebRTC for call audio. The backend transcodes carrier
+AMR/AMR-WB RTP to PCMU for the browser and encodes browser PCMU audio back to
+the negotiated carrier AMR format. Build the service-side AMR WebAssembly codec
+with:
 
 ```sh
-scripts/build-opencore-amr-wasm.sh
+scripts/build-opencore-amr-wasi.sh
 ```
 
-EVS remains intentionally unsupported in the browser adapter.
+Set `SIGMO_AMR_WASM` when the codec is not available at the default path
+`internal/pkg/voicecodec/assets/opencore-amr.wasm`.
 
-`media` is the negotiated call media object from the backend:
+The browser and backend use one built-in Google STUN server and one Cloudflare
+STUN server for ICE candidate discovery. There is no runtime STUN configuration.
 
-```ts
-type CallMediaInfo = {
-  codec: string
-  payloadType: number
-  clockRate: number
-  channels: number
-  dtmfPayloadType: number
-  dtmfClockRate: number
-  ptimeMillis: number
-}
-```
-
-The codec adapter works with one AMR speech frame at a time:
-
-```ts
-type AmrFrame = {
-  frameType: number
-  quality: boolean
-  data: Uint8Array
-}
-
-type PcmFrame = {
-  samples: Float32Array
-  sampleRate: number
-}
-```
-
-The browser pipeline already handles RTP packetization, AMR payload
-parsing/building, microphone capture, playback scheduling, and mono resampling.
-The codec adapter only converts AMR speech frames to PCM and PCM to AMR speech
-frames.
+The backend WebRTC ICE UDP ports are pinned to `40000-40100`; expose that UDP
+range on the server firewall.
 
 ### Compile and Hot-Reload for Development
 

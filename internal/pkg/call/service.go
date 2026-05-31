@@ -13,6 +13,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/phonenumber"
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	"github.com/damonto/sigmo/internal/pkg/voicecodec"
 	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
@@ -59,6 +60,14 @@ type Service struct {
 	mu          sync.Mutex
 	subscribers map[uint64]chan Event
 	nextSubID   uint64
+
+	amrMu      sync.Mutex
+	amrFactory *voicecodec.AMRCodecFactory
+	amrSource  string
+
+	bridgeMu sync.Mutex
+	bridges  map[*webRTCBridge]struct{}
+	closing  bool
 }
 
 type Event struct {
@@ -87,10 +96,16 @@ func New(store *storage.Store, wifiCalling wificalling.Coordinator) *Service {
 		store:       store,
 		wifiCalling: wifiCalling,
 		subscribers: make(map[uint64]chan Event),
+		bridges:     make(map[*webRTCBridge]struct{}),
 	}
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	defer func() {
+		if err := s.closeMedia(context.Background()); err != nil {
+			slog.Warn("close call media", "error", err)
+		}
+	}()
 	if s.wifiCalling == nil {
 		<-ctx.Done()
 		return nil

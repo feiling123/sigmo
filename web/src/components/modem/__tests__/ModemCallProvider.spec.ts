@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { computed, defineComponent, ref } from 'vue'
+import { computed, defineComponent, nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ModemCallProvider from '@/components/modem/ModemCallProvider.vue'
@@ -15,6 +15,7 @@ const route = vi.hoisted(() => ({
 const callsHarness = vi.hoisted(() => ({
   activeCall: null as unknown as ReturnType<typeof ref<CallRecord | null>>,
   incomingCall: null as unknown as ReturnType<typeof ref<CallRecord | null>>,
+  remoteStream: null as unknown as ReturnType<typeof ref<MediaStream | null>>,
   usePhoneCalls: vi.fn(),
   useCallAudioSession: vi.fn(),
 }))
@@ -73,11 +74,6 @@ vi.mock('@/composables/useModemPhoneCountry', () => ({
   useModemPhoneCountry: () => ({ phoneCountry: computed(() => 'US') }),
 }))
 
-vi.mock('@/lib/browserAmrCodec', () => ({
-  createBrowserAmrCodec: vi.fn(),
-  hasBrowserAmrCodec: () => false,
-}))
-
 const Consumer = defineComponent({
   setup() {
     const session = useModemCallSession(computed(() => 'fallback-modem'))
@@ -114,10 +110,21 @@ const mountProvider = () =>
   })
 
 describe('ModemCallProvider', () => {
+  let srcObject: MediaProvider | null
+
   beforeEach(() => {
+    srcObject = null
+    Object.defineProperty(HTMLMediaElement.prototype, 'srcObject', {
+      configurable: true,
+      get: () => srcObject,
+      set: (value: MediaProvider | null) => {
+        srcObject = value
+      },
+    })
     route.params.id = 'modem-1'
     callsHarness.activeCall = ref<CallRecord | null>(null)
     callsHarness.incomingCall = ref<CallRecord | null>(call())
+    callsHarness.remoteStream = ref<MediaStream | null>(null)
     callsHarness.usePhoneCalls.mockReset()
     callsHarness.usePhoneCalls.mockReturnValue({
       recentCalls: computed(() => []),
@@ -136,6 +143,7 @@ describe('ModemCallProvider', () => {
     callsHarness.useCallAudioSession.mockReset()
     callsHarness.useCallAudioSession.mockReturnValue({
       errorMessage: ref(''),
+      remoteStream: callsHarness.remoteStream,
       prepare: vi.fn(),
       start: vi.fn(),
       stop: vi.fn(),
@@ -149,5 +157,27 @@ describe('ModemCallProvider', () => {
     expect(wrapper.get('[data-testid="consumer"]').text()).toBe('(224) 225-5559')
     expect(wrapper.text()).toContain('(224) 225-5559')
     expect(wrapper.text()).toContain('Wi-Fi Calling')
+  })
+
+  it('plays the remote call audio stream when it is attached', async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    const wrapper = mountProvider()
+    const stream = {} as MediaStream
+
+    callsHarness.remoteStream.value = stream
+    await nextTick()
+
+    const audio = wrapper.get('audio').element as HTMLAudioElement
+    expect(audio.srcObject).toBe(callsHarness.remoteStream.value)
+    expect(play).toHaveBeenCalled()
+
+    callsHarness.remoteStream.value = null
+    await nextTick()
+
+    expect(audio.srcObject).toBeNull()
+    expect(pause).toHaveBeenCalled()
+    play.mockRestore()
+    pause.mockRestore()
   })
 })

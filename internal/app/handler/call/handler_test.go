@@ -1,17 +1,13 @@
 package call
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
@@ -81,7 +77,7 @@ func TestCallMediaErrorMapsExpectedFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := echo.New()
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/modems/test/calls/test/media", nil)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/modems/test/calls/test/webrtc-offer", nil)
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 
@@ -166,164 +162,6 @@ func TestBuildCallResponseFormatsUnsetTimesAsEmptyStrings(t *testing.T) {
 	}
 }
 
-func TestBuildMediaInfoResponseIncludesPayloadFormat(t *testing.T) {
-	response := buildMediaInfoResponse(pcall.MediaInfo{
-		Codec:           "AMR-WB",
-		PayloadType:     104,
-		ClockRate:       16000,
-		Channels:        1,
-		OctetAlign:      false,
-		DTMFPayloadType: 101,
-		DTMFClockRate:   8000,
-		PTimeMillis:     20,
-	})
-
-	if response.Codec != "AMR-WB" || response.PayloadType != 104 || response.ClockRate != 16000 {
-		t.Fatalf("media response = %+v, want AMR-WB payload 104 clock 16000", response)
-	}
-	if response.OctetAlign {
-		t.Fatal("OctetAlign = true, want false for bandwidth-efficient AMR")
-	}
-}
-
-func TestReadCallMediaForwardsRTPPackets(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	media := newFakeMediaSession()
-	packetCh := make(chan []byte, 1)
-	errCh := make(chan error, 1)
-
-	go readCallMedia(ctx, media, packetCh, errCh)
-
-	media.readCh <- []byte{1, 2, 3}
-
-	select {
-	case got := <-packetCh:
-		if string(got) != string([]byte{1, 2, 3}) {
-			t.Fatalf("packet = %v, want [1 2 3]", got)
-		}
-	case err := <-errCh:
-		t.Fatalf("readCallMedia() error = %v", err)
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for media packet")
-	}
-}
-
-func TestReadBrowserMediaWritesBinaryRTPPackets(t *testing.T) {
-	media := newFakeMediaSession()
-	errCh := make(chan error, 1)
-	serverDone := make(chan struct{})
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skipf("listen for websocket media test: %v", err)
-	}
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := callWSUpgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Errorf("Upgrade() error = %v", err)
-			close(serverDone)
-			return
-		}
-		defer conn.Close()
-		readBrowserMedia(r.Context(), conn, media, errCh)
-		close(serverDone)
-	}))
-	server.Listener = listener
-	server.Start()
-	defer server.Close()
-
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
-	if err != nil {
-		t.Fatalf("Dial() error = %v", err)
-	}
-	defer conn.Close()
-
-	if err := conn.WriteMessage(websocket.TextMessage, []byte("ignored")); err != nil {
-		t.Fatalf("WriteMessage(text) error = %v", err)
-	}
-	if err := conn.WriteMessage(websocket.BinaryMessage, []byte{4, 5, 6}); err != nil {
-		t.Fatalf("WriteMessage(binary) error = %v", err)
-	}
-
-	select {
-	case got := <-media.writeCh:
-		if string(got) != string([]byte{4, 5, 6}) {
-			t.Fatalf("written packet = %v, want [4 5 6]", got)
-		}
-	case err := <-errCh:
-		t.Fatalf("readBrowserMedia() error = %v", err)
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for written media packet")
-	}
-
-	if err := conn.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-	select {
-	case <-serverDone:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for websocket media reader to exit")
-	}
-}
-
-func TestWriteMediaErrorSendsStructuredError(t *testing.T) {
-	tests := []struct {
-		name string
-		err  mediaErrorResponse
-		want string
-	}{
-		{
-			name: "media unavailable",
-			err: mediaErrorResponse{
-				code:      errorCodeCallMediaUnavailable,
-				message:   "call media is not available",
-				requestID: "req-1",
-			},
-			want: "call media is not available",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				t.Skipf("listen for websocket media error test: %v", err)
-			}
-			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				conn, err := callWSUpgrader.Upgrade(w, r, nil)
-				if err != nil {
-					t.Errorf("Upgrade() error = %v", err)
-					return
-				}
-				defer conn.Close()
-				if err := writeMediaError(conn, tt.err); err != nil {
-					t.Errorf("writeMediaError() error = %v", err)
-				}
-			}))
-			server.Listener = listener
-			server.Start()
-			defer server.Close()
-
-			conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
-			if err != nil {
-				t.Fatalf("Dial() error = %v", err)
-			}
-			defer conn.Close()
-
-			var got MediaMessage
-			if err := conn.ReadJSON(&got); err != nil {
-				t.Fatalf("ReadJSON() error = %v", err)
-			}
-			if got.Type != "error" {
-				t.Fatalf("message type = %q, want error", got.Type)
-			}
-			if got.Error == nil || got.Error.Message != tt.want {
-				t.Fatalf("message error = %+v, want %q", got.Error, tt.want)
-			}
-		})
-	}
-}
-
 func TestCurrentCallEventsFiltersTerminalAndOtherModemCalls(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -370,40 +208,5 @@ func TestCurrentCallEventsFiltersTerminalAndOtherModemCalls(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-type fakeMediaSession struct {
-	readCh  chan []byte
-	writeCh chan []byte
-}
-
-func newFakeMediaSession() *fakeMediaSession {
-	return &fakeMediaSession{
-		readCh:  make(chan []byte, 1),
-		writeCh: make(chan []byte, 1),
-	}
-}
-
-func (f *fakeMediaSession) Info() pcall.MediaInfo {
-	return pcall.MediaInfo{}
-}
-
-func (f *fakeMediaSession) ReadPacket(ctx context.Context) ([]byte, error) {
-	select {
-	case packet := <-f.readCh:
-		return append([]byte(nil), packet...), nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-func (f *fakeMediaSession) WritePacket(ctx context.Context, packet []byte) error {
-	copy := append([]byte(nil), packet...)
-	select {
-	case f.writeCh <- copy:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 }

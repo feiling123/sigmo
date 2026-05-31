@@ -4,7 +4,12 @@ import { clearStoredToken, getStoredToken } from '@/lib/authStorage'
 import { handleError } from '@/lib/errorHandler'
 
 import type { ApiErrorResponse } from '@/types/api'
-import type { CallRecord, DialCallRequest, UpdateCallRequest } from '@/types/call'
+import type {
+  CallRecord,
+  DialCallRequest,
+  UpdateCallRequest,
+  WebRTCSessionDescriptionPayload,
+} from '@/types/call'
 
 type CallApiResult<T> = {
   data: Ref<T | undefined>
@@ -69,9 +74,6 @@ const buildCallWebSocketUrl = (id: string, path: string) => {
 }
 
 export const buildCallEventsUrl = (id: string) => buildCallWebSocketUrl(id, '/events')
-
-export const buildCallMediaUrl = (id: string, callID: string) =>
-  buildCallWebSocketUrl(id, `/${encodeURIComponent(callID)}/media`)
 
 const requestCallApi = async <T>(
   id: string,
@@ -146,6 +148,21 @@ export const useCallApi = () => {
     return updateCall(id, callID, { state: 'ended' })
   }
 
+  const createWebRTCAnswer = (
+    id: string,
+    callID: string,
+    payload: WebRTCSessionDescriptionPayload,
+  ) => {
+    return requestCallApi<WebRTCSessionDescriptionPayload>(
+      id,
+      `/${encodeURIComponent(callID)}/webrtc-offer`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    )
+  }
+
   const deleteCall = (id: string, callID: string) => {
     return requestCallApi<void>(id, `/${encodeURIComponent(callID)}`, { method: 'DELETE' })
   }
@@ -157,6 +174,7 @@ export const useCallApi = () => {
     answerCall,
     rejectCall,
     hangupCall,
+    createWebRTCAnswer,
     deleteCall,
   }
 }
