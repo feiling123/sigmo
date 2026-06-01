@@ -273,13 +273,8 @@ func (c *coordinator) StartEmergencyAddressUpdate(ctx context.Context, modem *mm
 	return c.createWFCWebsheet(ctx, result)
 }
 
-func (c *coordinator) EmergencyAddressUpdateAvailable(ctx context.Context, modem *mmodem.Modem) bool {
-	result, err := c.checkEmergencyAddressUpdate(ctx, modem)
-	if err != nil {
-		slog.Debug("check Wi-Fi Calling E911 update availability", "error", err)
-		return false
-	}
-	return result.Action == vowifi.WFCEntitlementActionOpenWebsheet && result.Websheet != nil
+func (c *coordinator) EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool {
+	return c.websheets != nil
 }
 
 func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (vowifi.WFCEntitlementResult, error) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
@@ -118,13 +118,17 @@ watch(
       :class="[
         'flex flex-col overflow-hidden',
         props.browserFrame
-          ? 'h-[88dvh] max-h-184 gap-0! rounded-lg border-0! p-0! sm:max-w-2xl'
+          ? 'h-[88dvh] max-h-184 gap-0! rounded-lg border-0! p-0! sm:max-w-[24rem]'
           : 'h-[85dvh] max-h-180 sm:max-w-[24rem]',
       ]"
     >
       <template v-if="props.browserFrame">
-        <div class="grid shrink-0 grid-cols-[minmax(0,1fr)_2.25rem] items-center gap-2 border-b bg-muted/40 px-2 py-2">
-          <div class="min-w-0 rounded-md border bg-background px-3 py-1.5 text-center text-xs text-muted-foreground shadow-xs">
+        <div
+          class="grid shrink-0 grid-cols-[minmax(0,1fr)_2.25rem] items-center gap-2 border-b bg-muted/40 px-2 py-2"
+        >
+          <div
+            class="min-w-0 rounded-md border bg-background px-3 py-1.5 text-center text-xs text-muted-foreground shadow-xs"
+          >
             <span class="block truncate">{{ title }}</span>
           </div>
           <button
@@ -168,10 +172,7 @@ watch(
         />
       </div>
 
-      <DialogFooter
-        v-if="props.showFooter"
-        class="shrink-0 grid grid-cols-1 gap-3 sm:grid-cols-2"
-      >
+      <DialogFooter v-if="props.showFooter" class="shrink-0 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Button
           variant="outline"
           type="button"

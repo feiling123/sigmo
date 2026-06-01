@@ -89,6 +89,31 @@ func TestNewOutgoingMessageKey(t *testing.T) {
 	}
 }
 
+func TestEmergencyAddressUpdateAvailable(t *testing.T) {
+	tests := []struct {
+		name string
+		c    *coordinator
+		want bool
+	}{
+		{
+			name: "unavailable without websheet broker",
+			c:    &coordinator{},
+		},
+		{
+			name: "available with websheet broker",
+			c:    &coordinator{websheets: websheet.New(websheet.Config{})},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.c.EmergencyAddressUpdateAvailable(context.Background(), nil); got != tt.want {
+				t.Fatalf("EmergencyAddressUpdateAvailable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSMSReportStatus(t *testing.T) {
 	tests := []struct {
 		name   string
