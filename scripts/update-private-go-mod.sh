@@ -125,7 +125,7 @@ main() {
 			return 1
 		fi
 
-		version="$(go list -modfile="${PRIVATE_MODFILE}" -m -f '{{ .Version }}' "${module}@${commit}")"
+		version="$(go list -mod=mod -modfile="${PRIVATE_MODFILE}" -m -f '{{ .Version }}' "${module}@${commit}")"
 		if [ -z "${version}" ]; then
 			echo "could not resolve Go version for ${module}@${commit}" >&2
 			return 1
