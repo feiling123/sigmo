@@ -77,6 +77,8 @@ type Service struct {
 	amrFactory *voicecodec.AMRCodecFactory
 	amrSource  string
 
+	ice webRTCICEProvider
+
 	bridgeMu sync.Mutex
 	bridges  map[*webRTCBridge]struct{}
 	closing  bool
@@ -114,6 +116,7 @@ func New(store *storage.Store, wifiCalling wificalling.Coordinator) *Service {
 		store:       store,
 		wifiCalling: wifiCalling,
 		subscribers: make(map[uint64]chan Event),
+		ice:         newWebRTCICEProvider(),
 		bridges:     make(map[*webRTCBridge]struct{}),
 	}
 }

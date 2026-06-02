@@ -84,7 +84,7 @@ func TestCallMediaErrorMapsExpectedFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/modems/test/calls/test/webrtc-offer", nil)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/modems/test/calls/test/webrtc-sessions", nil)
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 
@@ -169,6 +169,49 @@ func TestBuildCallResponseFormatsUnsetTimesAsEmptyStrings(t *testing.T) {
 	}
 	if response.AnsweredAt != "" || response.EndedAt != "" {
 		t.Fatalf("unset times = answered %q ended %q, want empty strings", response.AnsweredAt, response.EndedAt)
+	}
+}
+
+func TestBuildWebRTCICEServersResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		servers []pcall.WebRTCICEServer
+		wantURL string
+	}{
+		{
+			name: "turn credentials",
+			servers: []pcall.WebRTCICEServer{
+				{
+					URLs:       []string{"turn:turn.example.com:3478"},
+					Username:   "sigmo",
+					Credential: "secret",
+				},
+			},
+			wantURL: "turn:turn.example.com:3478",
+		},
+		{
+			name: "stun",
+			servers: []pcall.WebRTCICEServer{
+				{URLs: []string{"stun:stun.l.google.com:19302"}},
+			},
+			wantURL: "stun:stun.l.google.com:19302",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildWebRTCICEServersResponse(tt.servers)
+			if len(got.ICEServers) != 1 {
+				t.Fatalf("iceServers len = %d, want 1", len(got.ICEServers))
+			}
+			server := got.ICEServers[0]
+			if len(server.URLs) != 1 || server.URLs[0] != tt.wantURL {
+				t.Fatalf("urls = %v, want %q", server.URLs, tt.wantURL)
+			}
+			if server.Username != tt.servers[0].Username || server.Credential != tt.servers[0].Credential {
+				t.Fatalf("auth = %q/%q, want %q/%q", server.Username, server.Credential, tt.servers[0].Username, tt.servers[0].Credential)
+			}
+		})
 	}
 }
 

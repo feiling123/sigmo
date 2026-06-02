@@ -51,3 +51,15 @@ export type WebRTCSessionDescriptionPayload = {
   type: 'offer' | 'answer'
   sdp: string
 }
+
+export type WebRTCSessionPayload = {
+  offer: WebRTCSessionDescriptionPayload
+}
+
+export type WebRTCSessionResponsePayload = {
+  answer: WebRTCSessionDescriptionPayload
+}
+
+export type WebRTCICEServersPayload = {
+  iceServers: RTCIceServer[]
+}

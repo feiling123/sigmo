@@ -1,6 +1,7 @@
 import { shallowRef, type Ref } from 'vue'
 
 import { clearStoredToken, getStoredToken } from '@/lib/authStorage'
+import { resolveAPIURL, resolveAPIWebSocketURL } from '@/lib/apiUrl'
 import { handleError } from '@/lib/errorHandler'
 
 import type { ApiErrorResponse } from '@/types/api'
@@ -9,7 +10,9 @@ import type {
   DialCallRequest,
   SendDTMFRequest,
   UpdateCallRequest,
-  WebRTCSessionDescriptionPayload,
+  WebRTCICEServersPayload,
+  WebRTCSessionPayload,
+  WebRTCSessionResponsePayload,
 } from '@/types/call'
 
 type CallApiResult<T> = {
@@ -47,14 +50,8 @@ const buildCallApiError = (response: Response, data: unknown) => {
   return Object.assign(new Error(apiError.message), apiError)
 }
 
-const apiBase = () => {
-  const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
-  return rawBase && rawBase.trim().length > 0 ? rawBase.replace(/\/$/, '') : '/api/v1'
-}
-
 const buildCallHttpUrl = (id: string, path: string, query?: string) => {
-  const apiUrl = new URL(apiBase(), window.location.origin)
-  apiUrl.pathname = `${apiUrl.pathname.replace(/\/$/, '')}/modems/${id}/calls${path}`
+  const apiUrl = new URL(resolveAPIURL(`modems/${id}/calls${path}`))
   const trimmed = query?.trim()
   if (trimmed) {
     apiUrl.searchParams.set('q', trimmed)
@@ -62,16 +59,12 @@ const buildCallHttpUrl = (id: string, path: string, query?: string) => {
   return apiUrl.toString()
 }
 
+const buildCallMediaHttpUrl = (path: string) => {
+  return resolveAPIURL(`call-media${path}`)
+}
+
 const buildCallWebSocketUrl = (id: string, path: string) => {
-  const base = apiBase()
-  const apiUrl = new URL(base, window.location.origin)
-  apiUrl.protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:'
-  apiUrl.pathname = `${apiUrl.pathname.replace(/\/$/, '')}/modems/${id}/calls${path}`
-  const token = getStoredToken()
-  if (token) {
-    apiUrl.searchParams.set('token', token)
-  }
-  return apiUrl.toString()
+  return resolveAPIWebSocketURL(`modems/${id}/calls${path}`, getStoredToken())
 }
 
 export const buildCallEventsUrl = (id: string) => buildCallWebSocketUrl(id, '/events')
@@ -82,6 +75,17 @@ const requestCallApi = async <T>(
   init: RequestInit = {},
   query?: string,
 ): Promise<CallApiResult<T>> => {
+  return requestApi<T>(buildCallHttpUrl(id, path, query), init)
+}
+
+const requestCallMediaApi = async <T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<CallApiResult<T>> => {
+  return requestApi<T>(buildCallMediaHttpUrl(path), init)
+}
+
+const requestApi = async <T>(url: string, init: RequestInit = {}): Promise<CallApiResult<T>> => {
   const headers = new Headers(init.headers)
   const token = getStoredToken()
   if (token) {
@@ -94,7 +98,7 @@ const requestCallApi = async <T>(
   let response: Response
   let data: unknown
   try {
-    response = await fetch(buildCallHttpUrl(id, path, query), {
+    response = await fetch(url, {
       ...init,
       headers,
       mode: 'cors',
@@ -164,19 +168,23 @@ export const useCallApi = () => {
     })
   }
 
-  const createWebRTCAnswer = (
+  const createWebRTCSession = (
     id: string,
     callID: string,
-    payload: WebRTCSessionDescriptionPayload,
+    payload: WebRTCSessionPayload,
   ) => {
-    return requestCallApi<WebRTCSessionDescriptionPayload>(
+    return requestCallApi<WebRTCSessionResponsePayload>(
       id,
-      `/${encodeURIComponent(callID)}/webrtc-offer`,
+      `/${encodeURIComponent(callID)}/webrtc-sessions`,
       {
         method: 'POST',
         body: JSON.stringify(payload),
       },
     )
+  }
+
+  const getWebRTCICEServers = () => {
+    return requestCallMediaApi<WebRTCICEServersPayload>('/ice-servers')
   }
 
   const deleteCall = (id: string, callID: string) => {
@@ -193,7 +201,8 @@ export const useCallApi = () => {
     holdCall,
     resumeCall,
     sendDTMF,
-    createWebRTCAnswer,
+    createWebRTCSession,
+    getWebRTCICEServers,
     deleteCall,
   }
 }

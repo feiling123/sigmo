@@ -15,6 +15,7 @@ export type AudioStatusEvent =
 
 type AudioDeps = {
   createPeerConnection?: (configuration: RTCConfiguration) => RTCPeerConnection
+  getIceServers?: () => Promise<RTCIceServer[]>
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>
 }
 
@@ -121,6 +122,16 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   const createPeerConnection = (configuration: RTCConfiguration) =>
     options.deps?.createPeerConnection?.(configuration) ?? new RTCPeerConnection(configuration)
 
+  const getIceServers = async () => {
+    if (options.deps?.getIceServers) {
+      const servers = await options.deps.getIceServers()
+      return servers.length > 0 ? servers : defaultIceServers
+    }
+    const { data } = await calls.getWebRTCICEServers()
+    const servers = data.value?.iceServers ?? []
+    return servers.length > 0 ? servers : defaultIceServers
+  }
+
   const clearConnectionLossTimer = () => {
     if (!connectionLossTimer) return
     clearTimeout(connectionLossTimer)
@@ -161,7 +172,9 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       const localStream = await ensureAudioInput(nextAbort)
       if (!isCurrentSession(nextAbort)) return false
       applyStatus({ type: 'connect' })
-      const nextPC = createPeerConnection({ iceServers: defaultIceServers })
+      const iceServers = await getIceServers()
+      if (!isCurrentSession(nextAbort)) return false
+      const nextPC = createPeerConnection({ iceServers })
       pc = nextPC
       nextPC.ontrack = (event) => {
         remoteStream.value = event.streams[0] ?? new MediaStream([event.track])
@@ -205,11 +218,13 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       if (!localDescription) {
         throw new Error('WebRTC offer is missing a local description')
       }
-      const { data } = await calls.createWebRTCAnswer(modemId.value, callID, {
-        type: 'offer',
-        sdp: localDescription.sdp,
+      const { data } = await calls.createWebRTCSession(modemId.value, callID, {
+        offer: {
+          type: 'offer',
+          sdp: localDescription.sdp,
+        },
       })
-      const answer = data.value
+      const answer = data.value?.answer
       if (!answer) {
         throw new Error('Call audio answer is empty')
       }

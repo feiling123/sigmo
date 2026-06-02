@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { reduceAudioStatus, useCallAudioSession } from '@/composables/useCallAudioSession'
 
-const createWebRTCAnswer = vi.hoisted(() => vi.fn())
+const createWebRTCSession = vi.hoisted(() => vi.fn())
+const getWebRTCICEServers = vi.hoisted(() => vi.fn())
 
 vi.mock('@/apis/call', () => ({
   useCallApi: () => ({
-    createWebRTCAnswer,
+    createWebRTCSession,
+    getWebRTCICEServers,
   }),
 }))
 
@@ -85,8 +87,16 @@ describe('call audio session', () => {
   beforeEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
-    createWebRTCAnswer.mockResolvedValue({
-      data: ref({ type: 'answer', sdp: 'answer-sdp' }),
+    createWebRTCSession.mockResolvedValue({
+      data: ref({ answer: { type: 'answer', sdp: 'answer-sdp' } }),
+    })
+    getWebRTCICEServers.mockResolvedValue({
+      data: ref({
+        iceServers: [
+          { urls: ['stun:stun.l.google.com:19302'] },
+          { urls: ['stun:stun.cloudflare.com:3478'] },
+        ],
+      }),
     })
   })
 
@@ -111,7 +121,7 @@ describe('call audio session', () => {
         sampleSize: 16,
       },
     })
-    expect(createWebRTCAnswer).not.toHaveBeenCalled()
+    expect(createWebRTCSession).not.toHaveBeenCalled()
     expect(session.status.value).toBe('idle')
   })
 
@@ -131,20 +141,57 @@ describe('call audio session', () => {
 
     expect(createPeerConnection).toHaveBeenCalledWith({
       iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' },
+        { urls: ['stun:stun.l.google.com:19302'] },
+        { urls: ['stun:stun.cloudflare.com:3478'] },
       ],
     })
     expect(pc.addTrack).toHaveBeenCalledWith(track, stream)
-    expect(createWebRTCAnswer).toHaveBeenCalledWith('modem-1', 'call-1', {
-      type: 'offer',
-      sdp: 'offer-sdp',
+    expect(createWebRTCSession).toHaveBeenCalledWith('modem-1', 'call-1', {
+      offer: {
+        type: 'offer',
+        sdp: 'offer-sdp',
+      },
     })
     expect(pc.setRemoteDescription).toHaveBeenCalledWith({
       type: 'answer',
       sdp: 'answer-sdp',
     })
     expect(session.status.value).toBe('ready')
+  })
+
+  it('uses backend TURN servers when creating the WebRTC peer', async () => {
+    getWebRTCICEServers.mockResolvedValue({
+      data: ref({
+        iceServers: [
+          {
+            urls: ['turn:turn.cloudflare.com:3478?transport=udp'],
+            username: 'sigmo',
+            credential: 'secret',
+          },
+        ],
+      }),
+    })
+    const pc = new FakePeerConnection()
+    const createPeerConnection = vi.fn(() => pc as unknown as RTCPeerConnection)
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia: vi.fn(async () => fakeStream([fakeTrack()])),
+        createPeerConnection,
+      },
+    })
+
+    await expect(session.start('call-1')).resolves.toBe(true)
+
+    expect(getWebRTCICEServers).toHaveBeenCalledOnce()
+    expect(createPeerConnection).toHaveBeenCalledWith({
+      iceServers: [
+        {
+          urls: ['turn:turn.cloudflare.com:3478?transport=udp'],
+          username: 'sigmo',
+          credential: 'secret',
+        },
+      ],
+    })
   })
 
   it('toggles captured microphone tracks for call hold', async () => {
@@ -252,7 +299,7 @@ describe('call audio session', () => {
     await vi.advanceTimersByTimeAsync(20000)
 
     await expect(started).resolves.toBe(false)
-    expect(createWebRTCAnswer).not.toHaveBeenCalled()
+    expect(createWebRTCSession).not.toHaveBeenCalled()
     expect(pc.close).toHaveBeenCalled()
     expect(session.status.value).toBe('error')
     expect(session.errorMessage.value).toBe('WebRTC ICE candidates are missing')
@@ -279,9 +326,11 @@ describe('call audio session', () => {
     await vi.advanceTimersByTimeAsync(20000)
 
     await expect(started).resolves.toBe(true)
-    expect(createWebRTCAnswer).toHaveBeenCalledWith('modem-1', 'call-1', {
-      type: 'offer',
-      sdp: 'offer-sdp\r\na=candidate:1 1 udp 2130706431 192.0.2.10 40000 typ host\r\n',
+    expect(createWebRTCSession).toHaveBeenCalledWith('modem-1', 'call-1', {
+      offer: {
+        type: 'offer',
+        sdp: 'offer-sdp\r\na=candidate:1 1 udp 2130706431 192.0.2.10 40000 typ host\r\n',
+      },
     })
     expect(session.status.value).toBe('ready')
   })

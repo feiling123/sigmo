@@ -34,6 +34,24 @@ type EventMessage struct {
 	Call CallResponse `json:"call"`
 }
 
+type WebRTCICEServersResponse struct {
+	ICEServers []WebRTCICEServerResponse `json:"iceServers"`
+}
+
+type WebRTCICEServerResponse struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
+}
+
+type WebRTCSessionRequest struct {
+	Offer WebRTCSessionDescriptionRequest `json:"offer" validate:"required"`
+}
+
+type WebRTCSessionResponse struct {
+	Answer WebRTCSessionDescriptionResponse `json:"answer"`
+}
+
 type WebRTCSessionDescriptionRequest struct {
 	Type string `json:"type" validate:"required"`
 	SDP  string `json:"sdp" validate:"required"`

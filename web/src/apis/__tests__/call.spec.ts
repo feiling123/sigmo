@@ -164,4 +164,43 @@ describe('useCallApi', () => {
       }),
     )
   })
+
+  it('loads WebRTC ICE servers from call media resources', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ iceServers: [{ urls: ['turn:turn.cloudflare.com:3478'] }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await useCallApi().getWebRTCICEServers()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/call-media/ice-servers'),
+      expect.objectContaining({ mode: 'cors' }),
+    )
+  })
+
+  it('creates WebRTC sessions with POST requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ answer: { type: 'answer', sdp: 'answer-sdp' } }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await useCallApi().createWebRTCSession('modem-1', 'call/1', {
+      offer: { type: 'offer', sdp: 'offer-sdp' },
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1/webrtc-sessions'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ offer: { type: 'offer', sdp: 'offer-sdp' } }),
+      }),
+    )
+  })
 })

@@ -36,15 +36,14 @@ type WebRTCSessionDescription struct {
 	SDP  string
 }
 
-var defaultWebRTCICEServers = []webrtc.ICEServer{
-	{URLs: []string{"stun:stun.l.google.com:19302"}},
-	{URLs: []string{"stun:stun.cloudflare.com:3478"}},
-}
-
-func (s *Service) WebRTCOffer(ctx context.Context, modem *mmodem.Modem, callID string, offer WebRTCSessionDescription) (WebRTCSessionDescription, error) {
+func (s *Service) CreateWebRTCSession(ctx context.Context, modem *mmodem.Modem, callID string, offer WebRTCSessionDescription) (WebRTCSessionDescription, error) {
 	offer.Type = strings.TrimSpace(strings.ToLower(offer.Type))
 	if offer.Type != "offer" || strings.TrimSpace(offer.SDP) == "" {
 		return WebRTCSessionDescription{}, ErrMediaUnavailable
+	}
+	iceServers, err := s.webRTCICEServers(ctx)
+	if err != nil {
+		return WebRTCSessionDescription{}, fmt.Errorf("fetch WebRTC ICE servers: %w", err)
 	}
 	media, err := s.OpenMedia(ctx, modem, callID)
 	if err != nil {
@@ -68,7 +67,7 @@ func (s *Service) WebRTCOffer(ctx context.Context, modem *mmodem.Modem, callID s
 			return WebRTCSessionDescription{}, ErrMediaUnavailable
 		}
 	}
-	bridge, err := newWebRTCBridge(media, factory, codec)
+	bridge, err := newWebRTCBridge(media, factory, codec, iceServers)
 	if err != nil {
 		return WebRTCSessionDescription{}, err
 	}
@@ -198,7 +197,7 @@ const (
 	webRTCBridgeActionCloseNow
 )
 
-func newWebRTCBridge(media MediaSession, factory *voicecodec.AMRCodecFactory, codec bridgeCodec) (*webRTCBridge, error) {
+func newWebRTCBridge(media MediaSession, factory *voicecodec.AMRCodecFactory, codec bridgeCodec, iceServers []webrtc.ICEServer) (*webRTCBridge, error) {
 	info := media.Info()
 	if codec.amr != "" && factory == nil {
 		return nil, ErrMediaUnavailable
@@ -228,7 +227,7 @@ func newWebRTCBridge(media MediaSession, factory *voicecodec.AMRCodecFactory, co
 		webrtc.WithSettingEngine(settingEngine),
 	)
 	pc, err := api.NewPeerConnection(webrtc.Configuration{
-		ICEServers: defaultWebRTCICEServers,
+		ICEServers: iceServers,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create WebRTC peer connection: %w", err)

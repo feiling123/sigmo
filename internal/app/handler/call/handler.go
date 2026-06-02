@@ -24,6 +24,7 @@ type Handler struct {
 
 const (
 	errorCodeListCallsFailed           = "list_calls_failed"
+	errorCodeListWebRTCICEServers      = "list_webrtc_ice_servers_failed"
 	errorCodeDialCallInvalidRequest    = "dial_call_invalid_request"
 	errorCodeDialCallFailed            = "dial_call_failed"
 	errorCodeUpdateCallInvalidRequest  = "update_call_invalid_request"
@@ -51,7 +52,7 @@ const (
 	errorCodeDeleteCallFailed          = "delete_call_failed"
 	errorCodeCallMediaUnavailable      = "call_media_unavailable"
 	errorCodeCallMediaUnsupportedCodec = "call_media_unsupported_codec"
-	errorCodeCallWebRTCInvalidRequest  = "call_webrtc_invalid_request"
+	errorCodeCallWebRTCInvalidRequest  = "call_webrtc_session_invalid_request"
 	errorCodeSubscribeCallEventsFailed = "subscribe_call_events_failed"
 )
 
@@ -75,6 +76,14 @@ func (h *Handler) List(c *echo.Context) error {
 		return httpapi.Internal(c, errorCodeListCallsFailed, err)
 	}
 	return c.JSON(http.StatusOK, buildCallResponses(calls))
+}
+
+func (h *Handler) WebRTCICEServers(c *echo.Context) error {
+	servers, err := h.calls.WebRTCICEServers(c.Request().Context())
+	if err != nil {
+		return httpapi.Internal(c, errorCodeListWebRTCICEServers, err)
+	}
+	return c.JSON(http.StatusOK, buildWebRTCICEServersResponse(servers))
 }
 
 func (h *Handler) Dial(c *echo.Context) error {
@@ -251,25 +260,27 @@ func (h *Handler) Events(c *echo.Context) error {
 	}
 }
 
-func (h *Handler) WebRTCOffer(c *echo.Context) error {
+func (h *Handler) CreateWebRTCSession(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeCallMediaUnavailable)
 	}
-	var req WebRTCSessionDescriptionRequest
+	var req WebRTCSessionRequest
 	if err := httpapi.BindAndValidate(c, &req, errorCodeCallWebRTCInvalidRequest); err != nil {
 		return err
 	}
-	answer, err := h.calls.WebRTCOffer(c.Request().Context(), modem, callIDParam(c), pcall.WebRTCSessionDescription{
-		Type: req.Type,
-		SDP:  req.SDP,
+	answer, err := h.calls.CreateWebRTCSession(c.Request().Context(), modem, callIDParam(c), pcall.WebRTCSessionDescription{
+		Type: req.Offer.Type,
+		SDP:  req.Offer.SDP,
 	})
 	if err != nil {
 		return callMediaError(c, err)
 	}
-	return c.JSON(http.StatusOK, WebRTCSessionDescriptionResponse{
-		Type: answer.Type,
-		SDP:  answer.SDP,
+	return c.JSON(http.StatusCreated, WebRTCSessionResponse{
+		Answer: WebRTCSessionDescriptionResponse{
+			Type: answer.Type,
+			SDP:  answer.SDP,
+		},
 	})
 }
 
@@ -373,6 +384,18 @@ func buildCallResponses(calls []storage.Call) []CallResponse {
 		response = append(response, buildCallResponse(call))
 	}
 	return response
+}
+
+func buildWebRTCICEServersResponse(servers []pcall.WebRTCICEServer) WebRTCICEServersResponse {
+	out := make([]WebRTCICEServerResponse, 0, len(servers))
+	for _, server := range servers {
+		out = append(out, WebRTCICEServerResponse{
+			URLs:       server.URLs,
+			Username:   server.Username,
+			Credential: server.Credential,
+		})
+	}
+	return WebRTCICEServersResponse{ICEServers: out}
 }
 
 func buildCallResponse(call storage.Call) CallResponse {

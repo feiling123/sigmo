@@ -43,8 +43,12 @@ scripts/build-opencore-amr-wasi.sh
 Set `SIGMO_AMR_WASM` when the codec is not available at the default path
 `internal/pkg/voicecodec/assets/opencore-amr.wasm`.
 
-The browser and backend use one built-in Google STUN server and one Cloudflare
-STUN server for ICE candidate discovery. There is no runtime STUN configuration.
+Before creating a browser offer, the UI loads ICE configuration from
+`GET /api/v1/call-media/ice-servers`. The backend uses the same ICE
+configuration when creating the WebRTC answer.
+
+Sigmo fetches short-lived Cloudflare TURN credentials from
+`https://speed.cloudflare.com/turn-creds`.
 
 The backend WebRTC ICE UDP ports are pinned to `40000-40100`; expose that UDP
 range on the server firewall.
