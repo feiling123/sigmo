@@ -23,22 +23,22 @@ func (c *coordinator) ExecuteUSSD(ctx context.Context, modem *mmodem.Modem, acti
 	case actionUSSDInitialize:
 		session, err := client.USSD().Start()
 		if err != nil {
-			return "", err
+			return "", c.handleClientDisconnected(modem.EquipmentIdentifier, client, err)
 		}
 		result, err := session.Send(ctx, code)
 		if err != nil {
-			return "", err
+			return "", c.handleClientDisconnected(modem.EquipmentIdentifier, client, err)
 		}
 		c.setUSSDSession(modem.EquipmentIdentifier, session, result.Closed)
 		return result.Message.Text, nil
 	case actionUSSDReply:
-		session, err := c.ussdSession(modem.EquipmentIdentifier)
+		client, session, err := c.ussdSession(modem.EquipmentIdentifier)
 		if err != nil {
 			return "", err
 		}
 		result, err := session.Reply(ctx, code)
 		if err != nil {
-			return "", err
+			return "", c.handleClientDisconnected(modem.EquipmentIdentifier, client, err)
 		}
 		c.setUSSDSession(modem.EquipmentIdentifier, session, result.Closed)
 		return result.Message.Text, nil
@@ -47,14 +47,14 @@ func (c *coordinator) ExecuteUSSD(ctx context.Context, modem *mmodem.Modem, acti
 	}
 }
 
-func (c *coordinator) ussdSession(modemID string) (*vowifi.Session, error) {
+func (c *coordinator) ussdSession(modemID string) (*vowifi.Client, *vowifi.Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]
 	if session == nil || session.ussd == nil {
-		return nil, vowifi.ErrUSSDNotStarted
+		return nil, nil, vowifi.ErrUSSDNotStarted
 	}
-	return session.ussd, nil
+	return session.client, session.ussd, nil
 }
 
 func (c *coordinator) setUSSDSession(modemID string, ussd *vowifi.Session, closed bool) {

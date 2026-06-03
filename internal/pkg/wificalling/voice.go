@@ -51,7 +51,7 @@ func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to stri
 	defer c.clearPendingVoiceDial(modem.EquipmentIdentifier, pending)
 	call, err := client.Voice().Dial(ctx, imsvoice.DialRequest{To: to, Media: browserVoiceMediaOffer()})
 	if err != nil {
-		err = normalizeVoiceError(err)
+		err = normalizeVoiceError(c.handleClientDisconnected(modem.EquipmentIdentifier, client, err))
 		if errors.Is(err, ErrNotConnected) {
 			return VoiceCall{}, err
 		}
@@ -227,12 +227,12 @@ func browserVoiceConfig() imsvoice.Config {
 }
 
 func (c *coordinator) AnswerCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
-	call, info, err := c.lookupVoiceCall(ctx, modem, callID)
+	client, call, info, err := c.lookupVoiceCall(ctx, modem, callID)
 	if err != nil {
 		return VoiceCall{}, err
 	}
 	if err := call.Answer(ctx, browserVoiceMediaOffer()); err != nil {
-		return VoiceCall{}, normalizeVoiceError(err)
+		return VoiceCall{}, normalizeVoiceError(c.handleClientDisconnected(modem.EquipmentIdentifier, client, err))
 	}
 	info, _ = advanceVoiceCall(info, voiceCallTransition{
 		state:    string(call.State()),
@@ -246,12 +246,12 @@ func (c *coordinator) AnswerCall(ctx context.Context, modem *mmodem.Modem, callI
 }
 
 func (c *coordinator) RejectCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
-	call, info, err := c.lookupVoiceCall(ctx, modem, callID)
+	client, call, info, err := c.lookupVoiceCall(ctx, modem, callID)
 	if err != nil {
 		return VoiceCall{}, err
 	}
 	if err := call.Reject(ctx, 486, "Busy Here"); err != nil {
-		return VoiceCall{}, normalizeVoiceError(err)
+		return VoiceCall{}, normalizeVoiceError(c.handleClientDisconnected(modem.EquipmentIdentifier, client, err))
 	}
 	info, _ = advanceVoiceCall(info, voiceCallTransition{
 		state:     string(call.State()),
@@ -267,12 +267,12 @@ func (c *coordinator) RejectCall(ctx context.Context, modem *mmodem.Modem, callI
 }
 
 func (c *coordinator) HangupCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
-	call, info, err := c.lookupVoiceCall(ctx, modem, callID)
+	client, call, info, err := c.lookupVoiceCall(ctx, modem, callID)
 	if err != nil {
 		return VoiceCall{}, err
 	}
 	if err := call.Hangup(ctx); err != nil {
-		return VoiceCall{}, normalizeVoiceError(err)
+		return VoiceCall{}, normalizeVoiceError(c.handleClientDisconnected(modem.EquipmentIdentifier, client, err))
 	}
 	info, _ = advanceVoiceCall(info, voiceCallTransition{
 		state: string(call.State()),
@@ -286,12 +286,12 @@ func (c *coordinator) HangupCall(ctx context.Context, modem *mmodem.Modem, callI
 }
 
 func (c *coordinator) HoldCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
-	call, info, err := c.lookupVoiceCall(ctx, modem, callID)
+	client, call, info, err := c.lookupVoiceCall(ctx, modem, callID)
 	if err != nil {
 		return VoiceCall{}, err
 	}
 	if err := call.Hold(ctx); err != nil {
-		return VoiceCall{}, normalizeVoiceError(err)
+		return VoiceCall{}, normalizeVoiceError(c.handleClientDisconnected(modem.EquipmentIdentifier, client, err))
 	}
 	info, _ = advanceVoiceCall(info, voiceCallTransition{
 		state: string(call.State()),
@@ -304,12 +304,12 @@ func (c *coordinator) HoldCall(ctx context.Context, modem *mmodem.Modem, callID 
 }
 
 func (c *coordinator) ResumeCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
-	call, info, err := c.lookupVoiceCall(ctx, modem, callID)
+	client, call, info, err := c.lookupVoiceCall(ctx, modem, callID)
 	if err != nil {
 		return VoiceCall{}, err
 	}
 	if err := call.Resume(ctx); err != nil {
-		return VoiceCall{}, normalizeVoiceError(err)
+		return VoiceCall{}, normalizeVoiceError(c.handleClientDisconnected(modem.EquipmentIdentifier, client, err))
 	}
 	info, _ = advanceVoiceCall(info, voiceCallTransition{
 		state: string(call.State()),
@@ -322,18 +322,18 @@ func (c *coordinator) ResumeCall(ctx context.Context, modem *mmodem.Modem, callI
 }
 
 func (c *coordinator) SendCallDTMF(ctx context.Context, modem *mmodem.Modem, callID string, digits string) error {
-	call, _, err := c.lookupVoiceCall(ctx, modem, callID)
+	client, call, _, err := c.lookupVoiceCall(ctx, modem, callID)
 	if err != nil {
 		return err
 	}
 	if err := call.SendDTMF(ctx, imsvoice.DTMFRequest{Digits: digits}); err != nil {
-		return normalizeVoiceError(err)
+		return normalizeVoiceError(c.handleClientDisconnected(modem.EquipmentIdentifier, client, err))
 	}
 	return nil
 }
 
 func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, callID string) (MediaSession, error) {
-	call, _, err := c.lookupVoiceCall(ctx, modem, callID)
+	_, call, _, err := c.lookupVoiceCall(ctx, modem, callID)
 	if err != nil {
 		return nil, err
 	}
@@ -413,23 +413,23 @@ func (s callMediaSession) WritePacket(ctx context.Context, packet []byte) error 
 	return s.call.WriteRTP(ctx, packet)
 }
 
-func (c *coordinator) lookupVoiceCall(ctx context.Context, modem *mmodem.Modem, callID string) (*imsvoice.Call, VoiceCall, error) {
+func (c *coordinator) lookupVoiceCall(ctx context.Context, modem *mmodem.Modem, callID string) (*vowifi.Client, *imsvoice.Call, VoiceCall, error) {
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
-		return nil, VoiceCall{}, err
+		return nil, nil, VoiceCall{}, err
 	}
 	callID = strings.TrimSpace(callID)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modem.EquipmentIdentifier]
 	if session == nil || session.profileID != profileID || session.calls == nil {
-		return nil, VoiceCall{}, ErrNotConnected
+		return nil, nil, VoiceCall{}, ErrNotConnected
 	}
 	state := session.calls[callID]
 	if state == nil || state.call == nil {
-		return nil, VoiceCall{}, ErrUnavailable
+		return nil, nil, VoiceCall{}, ErrUnavailable
 	}
-	return state.call, state.info, nil
+	return session.client, state.call, state.info, nil
 }
 
 func (c *coordinator) storeVoiceCall(modemID string, profileID string, call *imsvoice.Call, number string, direction string, state string, reason string) VoiceCall {

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -56,6 +57,9 @@ func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to strin
 	}
 	submission, err := client.SMS().Send(ctx, to, text)
 	if err != nil {
+		if errors.Is(err, vowifi.ErrClientNotConnected) {
+			return storage.Message{}, c.handleClientDisconnected(modem.EquipmentIdentifier, client, err)
+		}
 		return storage.Message{}, err
 	}
 	msg := storage.Message{

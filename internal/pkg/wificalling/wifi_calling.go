@@ -39,6 +39,7 @@ type coordinator struct {
 type sessionState struct {
 	cancel      context.CancelFunc
 	done        <-chan struct{}
+	reconnect   chan struct{}
 	phase       sessionPhase
 	client      *vowifi.Client
 	ussd        *vowifi.Session

@@ -21,8 +21,10 @@ func TestSendRoutesMessages(t *testing.T) {
 		status        wificalling.Status
 		statusErr     error
 		sendErr       error
+		wifiSendErr   error
 		wantTo        string
 		wantErr       string
+		wantErrIs     error
 		wantWiFiSends int
 		wantModemSend int
 	}{
@@ -44,6 +46,14 @@ func TestSendRoutesMessages(t *testing.T) {
 			name:      "wifi calling status error stops send",
 			statusErr: errors.New("settings unavailable"),
 			wantErr:   "read wifi calling status: settings unavailable",
+		},
+		{
+			name:          "preferred wifi calling disconnected",
+			status:        wificalling.Status{Settings: wificalling.Settings{Preferred: true}, Connected: true},
+			wifiSendErr:   wificalling.ErrNotConnected,
+			wantErr:       "send SMS to 777 over wifi calling: wifi calling is not connected",
+			wantErrIs:     ErrWiFiCallingNotConnected,
+			wantWiFiSends: 1,
 		},
 		{
 			name:          "modem error is returned when wifi calling is disconnected",
@@ -72,6 +82,7 @@ func TestSendRoutesMessages(t *testing.T) {
 					Status:      "sent",
 					WiFiCalling: true,
 				},
+				sendErr: tt.wifiSendErr,
 			}
 			device := &fakeModemDevice{
 				id:      "modem-1",
@@ -86,6 +97,9 @@ func TestSendRoutesMessages(t *testing.T) {
 				if err == nil || err.Error() != tt.wantErr {
 					t.Fatalf("send() error = %v, want %q", err, tt.wantErr)
 				}
+				if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
+					t.Fatalf("send() error = %v, want %v", err, tt.wantErrIs)
+				}
 			} else if err != nil {
 				t.Fatalf("send() error = %v", err)
 			}
@@ -95,8 +109,12 @@ func TestSendRoutesMessages(t *testing.T) {
 			if wifiCalling.sendSMSCalls != tt.wantWiFiSends {
 				t.Fatalf("Wi-Fi Calling sends = %d, want %d", wifiCalling.sendSMSCalls, tt.wantWiFiSends)
 			}
-			if wifiCalling.applySMSStatusCalls != tt.wantWiFiSends {
-				t.Fatalf("Wi-Fi Calling status applies = %d, want %d", wifiCalling.applySMSStatusCalls, tt.wantWiFiSends)
+			wantStatusApplies := tt.wantWiFiSends
+			if tt.wantErr != "" {
+				wantStatusApplies = 0
+			}
+			if wifiCalling.applySMSStatusCalls != wantStatusApplies {
+				t.Fatalf("Wi-Fi Calling status applies = %d, want %d", wifiCalling.applySMSStatusCalls, wantStatusApplies)
 			}
 			if device.sendCalls != tt.wantModemSend {
 				t.Fatalf("modem sends = %d, want %d", device.sendCalls, tt.wantModemSend)
@@ -225,6 +243,7 @@ type fakeWiFiCalling struct {
 	status              wificalling.Status
 	statusErr           error
 	message             storage.Message
+	sendErr             error
 	sendSMSCalls        int
 	applySMSStatusCalls int
 }
@@ -257,7 +276,7 @@ func (fakeWiFiCalling) StartEmergencyAddressUpdate(context.Context, *mmodem.Mode
 
 func (f *fakeWiFiCalling) SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error) {
 	f.sendSMSCalls++
-	return f.message, nil
+	return f.message, f.sendErr
 }
 
 func (f *fakeWiFiCalling) ApplyPendingSMSStatus(context.Context, storage.Message) error {

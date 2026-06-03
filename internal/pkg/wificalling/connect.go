@@ -73,6 +73,7 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 	c.sessions[modemID] = &sessionState{
 		cancel:    cancel,
 		done:      done,
+		reconnect: make(chan struct{}, 1),
 		phase:     sessionPhaseConnecting,
 		modemPath: modem.Path(),
 		profileID: profileID,
@@ -199,6 +200,7 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 	defer smsEvents.Close()
 	voiceEvents := client.Voice().Events()
 	defer voiceEvents.Close()
+	reconnect := c.reconnectChannel(modem.EquipmentIdentifier, client)
 	for {
 		select {
 		case msg, ok := <-smsEvents.Incoming:
@@ -239,8 +241,21 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 			_ = client.Close()
 			c.markDisconnected(modem.EquipmentIdentifier, client)
 			return
+		case <-reconnect:
+			_ = client.Close()
+			return
 		}
 	}
+}
+
+func (c *coordinator) reconnectChannel(modemID string, client *vowifi.Client) <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session := c.sessions[modemID]
+	if session == nil || session.client != client {
+		return nil
+	}
+	return session.reconnect
 }
 
 func (c *coordinator) connectedClient(modemID string, profileID string) (*vowifi.Client, error) {
@@ -292,6 +307,43 @@ func (c *coordinator) markDisconnected(modemID string, client *vowifi.Client) {
 
 	for _, call := range events {
 		c.publishVoiceEvent(call)
+	}
+}
+
+func (c *coordinator) handleClientDisconnected(modemID string, client *vowifi.Client, err error) error {
+	if !errors.Is(err, vowifi.ErrClientNotConnected) {
+		return err
+	}
+	if client != nil {
+		c.requestReconnect(modemID, client)
+	}
+	return ErrNotConnected
+}
+
+func (c *coordinator) requestReconnect(modemID string, client *vowifi.Client) {
+	c.mu.Lock()
+	session := c.sessions[modemID]
+	if session == nil || session.client != client {
+		c.mu.Unlock()
+		return
+	}
+	ch := session.reconnect
+	session.client = nil
+	session.connected = false
+	session.connectedAt = time.Time{}
+	session.phase = sessionPhaseDisconnected
+	events := disconnectedCallEvents(session)
+	c.mu.Unlock()
+
+	for _, call := range events {
+		c.publishVoiceEvent(call)
+	}
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
 	}
 }
 

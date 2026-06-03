@@ -30,6 +30,7 @@ const (
 	errorCodeRecipientInvalid          = "invalid_recipient"
 	errorCodeTextRequired              = "text_required"
 	errorCodeSendMessageFailed         = "send_message_failed"
+	errorCodeWiFiCallingNotConnected   = "wifi_calling_not_connected"
 	errorCodeDeleteMessageThreadFailed = "delete_message_thread_failed"
 )
 
@@ -102,6 +103,9 @@ func writeSendMessageError(c *echo.Context, err error) error {
 	}
 	if errors.Is(err, pmessage.ErrTextRequired) {
 		return httpapi.BadRequest(c, errorCodeTextRequired, err)
+	}
+	if errors.Is(err, pmessage.ErrWiFiCallingNotConnected) {
+		return httpapi.Error(c, http.StatusServiceUnavailable, errorCodeWiFiCallingNotConnected, err.Error())
 	}
 	return httpapi.Internal(c, errorCodeSendMessageFailed, err)
 }

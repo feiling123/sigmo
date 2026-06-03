@@ -123,7 +123,7 @@ func (s *Service) send(ctx context.Context, device modemDevice, to string, text 
 	if settings.Preferred && settings.Connected {
 		msg, err := s.wifiCalling.SendSMS(ctx, device.modem(), to, text)
 		if err != nil {
-			return "", fmt.Errorf("send SMS to %s over wifi calling: %w", to, err)
+			return "", mapWiFiCallingSendError(to, err)
 		}
 		if err := s.insertSentMessage(ctx, msg); err != nil {
 			return "", err
@@ -144,6 +144,13 @@ func (s *Service) send(ctx context.Context, device modemDevice, to string, text 
 		return "", err
 	}
 	return to, nil
+}
+
+func mapWiFiCallingSendError(to string, err error) error {
+	if errors.Is(err, wificalling.ErrNotConnected) {
+		return fmt.Errorf("send SMS to %s over wifi calling: %w", to, ErrWiFiCallingNotConnected)
+	}
+	return fmt.Errorf("send SMS to %s over wifi calling: %w", to, err)
 }
 
 func (s *Service) insertSentMessage(ctx context.Context, msg storage.Message) error {

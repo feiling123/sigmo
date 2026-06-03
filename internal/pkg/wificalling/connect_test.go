@@ -230,6 +230,33 @@ func TestMarkDisconnectedIgnoresStaleClient(t *testing.T) {
 	}
 }
 
+func TestMapClientConnectionErrorMarksSessionDisconnected(t *testing.T) {
+	client := &vowifi.Client{}
+	c := &coordinator{
+		sessions: map[string]*sessionState{
+			"modem-1": {
+				client:    client,
+				connected: true,
+				phase:     sessionPhaseConnected,
+			},
+		},
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+	}
+
+	err := c.handleClientDisconnected("modem-1", client, errors.Join(errors.New("sending SMS"), vowifi.ErrClientNotConnected))
+
+	if !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("handleClientDisconnected() error = %v, want %v", err, ErrNotConnected)
+	}
+	session := c.sessions["modem-1"]
+	if session.connected || session.client != nil {
+		t.Fatalf("session connected = %v client nil = %v, want disconnected", session.connected, session.client == nil)
+	}
+	if session.phase != sessionPhaseDisconnected {
+		t.Fatalf("phase = %q, want %q", session.phase, sessionPhaseDisconnected)
+	}
+}
+
 func TestStopFailsOpenCallsBeforeRemovingSession(t *testing.T) {
 	cancelled := false
 	c := &coordinator{
