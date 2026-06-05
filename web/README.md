@@ -40,7 +40,7 @@ with:
 scripts/build-opencore-amr-wasi.sh
 ```
 
-Set `SIGMO_AMR_WASM` when the codec is not available at the default path
+The backend loads the codec from
 `internal/pkg/voicecodec/assets/opencore-amr.wasm`.
 
 Before creating a browser offer, the UI loads ICE configuration from

@@ -74,7 +74,6 @@ type Service struct {
 
 	amrMu      sync.Mutex
 	amrFactory *voicecodec.AMRCodecFactory
-	amrSource  string
 
 	ice webRTCICEProvider
 

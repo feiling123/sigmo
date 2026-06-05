@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -62,13 +61,11 @@ func (s *Service) OpenWebRTCSession(ctx context.Context, modem *mmodem.Modem, ca
 	}
 	var factory *voicecodec.AMRCodecFactory
 	if codec.amr != "" {
-		var source string
-		factory, source, err = s.amrCodecFactory(ctx)
+		factory, err = s.amrCodecFactory(ctx)
 		if err != nil {
 			slog.Warn("open AMR codec",
 				"call_id", callID,
 				"modem", modem.EquipmentIdentifier,
-				"source", source,
 				"error", err,
 			)
 			return nil, ErrMediaUnavailable
@@ -135,41 +132,25 @@ func (s *WebRTCSession) Connected() bool {
 	return s.bridge.connected()
 }
 
-func amrWASMPath() string {
-	return strings.TrimSpace(os.Getenv("SIGMO_AMR_WASM"))
-}
-
-func (s *Service) amrCodecFactory(ctx context.Context) (*voicecodec.AMRCodecFactory, string, error) {
+func (s *Service) amrCodecFactory(ctx context.Context) (*voicecodec.AMRCodecFactory, error) {
 	s.amrMu.Lock()
 	defer s.amrMu.Unlock()
 	if s.amrFactory != nil {
-		return s.amrFactory, s.amrSource, nil
+		return s.amrFactory, nil
 	}
 
-	source := "embedded"
-	var (
-		factory *voicecodec.AMRCodecFactory
-		err     error
-	)
-	if path := amrWASMPath(); path != "" {
-		source = path
-		factory, err = voicecodec.NewAMRCodecFactoryFromFile(ctx, path)
-	} else {
-		factory, err = voicecodec.NewDefaultAMRCodecFactory(ctx)
-	}
+	factory, err := voicecodec.NewDefaultAMRCodecFactory(ctx)
 	if err != nil {
-		return nil, source, err
+		return nil, err
 	}
 	s.amrFactory = factory
-	s.amrSource = source
-	return factory, source, nil
+	return factory, nil
 }
 
 func (s *Service) closeAMRCodecFactory(ctx context.Context) error {
 	s.amrMu.Lock()
 	factory := s.amrFactory
 	s.amrFactory = nil
-	s.amrSource = ""
 	s.amrMu.Unlock()
 	if factory == nil {
 		return nil

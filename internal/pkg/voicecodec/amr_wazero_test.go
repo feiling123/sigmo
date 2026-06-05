@@ -2,7 +2,6 @@ package voicecodec
 
 import (
 	"context"
-	"os"
 	"testing"
 )
 
@@ -13,9 +12,9 @@ func TestAMRCodecFactoryOpen(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "missing file",
+			name: "invalid wasm",
 			open: func(ctx context.Context) (*AMRCodecFactory, error) {
-				return NewAMRCodecFactoryFromFile(ctx, "/tmp/sigmo-missing-amr-codec.wasm")
+				return NewAMRCodecFactory(ctx, []byte("not wasm"))
 			},
 			wantErr: true,
 		},
@@ -45,14 +44,10 @@ func TestAMRCodecFactoryOpen(t *testing.T) {
 }
 
 func BenchmarkWASMAMRCodec(b *testing.B) {
-	path := os.Getenv("SIGMO_AMR_WASM")
-	if path == "" {
-		b.Skip("set SIGMO_AMR_WASM to benchmark the service-side AMR codec")
-	}
 	ctx := context.Background()
-	factory, err := NewAMRCodecFactoryFromFile(ctx, path)
+	factory, err := NewDefaultAMRCodecFactory(ctx)
 	if err != nil {
-		b.Fatalf("NewAMRCodecFactoryFromFile() error = %v", err)
+		b.Fatalf("NewDefaultAMRCodecFactory() error = %v", err)
 	}
 	defer factory.Close(ctx)
 	codec, err := factory.NewCodec(ctx, CodecAMR)

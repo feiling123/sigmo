@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/tetratelabs/wazero"
@@ -42,14 +41,6 @@ func NewAMRCodecFactory(ctx context.Context, wasm []byte) (*AMRCodecFactory, err
 		return nil, fmt.Errorf("compile amr wasm: %w", err)
 	}
 	return &AMRCodecFactory{runtime: runtime, module: module}, nil
-}
-
-func NewAMRCodecFactoryFromFile(ctx context.Context, path string) (*AMRCodecFactory, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read amr wasm: %w", err)
-	}
-	return NewAMRCodecFactory(ctx, data)
 }
 
 func (f *AMRCodecFactory) NewCodec(ctx context.Context, codec AMRCodec) (*WASMAMRCodec, error) {
