@@ -92,13 +92,13 @@ func (p *NetworkPreferences) restoreWithRetry(ctx context.Context, m *Modem) {
 			return
 		}
 		if !retry {
-			slog.Warn("restore network preferences", "modem", m.EquipmentIdentifier, "error", err)
+			slog.Warn("restore network preferences", "imei", m.EquipmentIdentifier, "error", err)
 			return
 		}
 		if warned {
-			slog.Debug("retry network preferences restore", "modem", m.EquipmentIdentifier, "error", err)
+			slog.Debug("retry network preferences restore", "imei", m.EquipmentIdentifier, "error", err)
 		} else {
-			slog.Warn("restore network preferences", "modem", m.EquipmentIdentifier, "error", err)
+			slog.Warn("restore network preferences", "imei", m.EquipmentIdentifier, "error", err)
 			warned = true
 		}
 		if err := sleepContext(ctx, networkPreferencesRetryInterval); err != nil {
@@ -186,7 +186,7 @@ func restoreModePreference(ctx context.Context, m *Modem, mode ModemModePair) (b
 	if err := m.SetCurrentModes(ctx, mode); err != nil {
 		return isTransientRestartError(err), fmt.Errorf("set current modes: %w", err)
 	}
-	slog.Info("network mode restored", "modem", m.EquipmentIdentifier, "allowed", mode.Allowed, "preferred", mode.Preferred)
+	slog.Info("network mode restored", "imei", m.EquipmentIdentifier, "allowed", mode.Allowed, "preferred", mode.Preferred)
 	return false, nil
 }
 
@@ -221,7 +221,7 @@ func restoreBandPreference(ctx context.Context, m *Modem, bands []ModemBand) (bo
 	if err := m.SetCurrentBands(ctx, bands); err != nil {
 		return isTransientRestartError(err), fmt.Errorf("set current bands: %w", err)
 	}
-	slog.Info("network bands restored", "modem", m.EquipmentIdentifier, "bands", bands)
+	slog.Info("network bands restored", "imei", m.EquipmentIdentifier, "bands", bands)
 	return false, nil
 }
 

@@ -69,11 +69,14 @@ func TestInternalLogsError(t *testing.T) {
 				"error_code=",
 				"request_id=request-1",
 				"method=POST",
-				"modem=860588043408833",
+				"imei=860588043408833",
 			} {
 				if !strings.Contains(logs.String(), want) {
 					t.Fatalf("logs = %s, want it to contain %q", logs.String(), want)
 				}
+			}
+			if strings.Contains(logs.String(), "modem=860588043408833") {
+				t.Fatalf("logs = %s, want it not to contain legacy modem field", logs.String())
 			}
 		})
 	}

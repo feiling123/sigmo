@@ -78,7 +78,7 @@ func takeoverDefaultRoutesWithStore(ctx context.Context, state connectionStateSt
 
 func logDefaultRouteTakeover(modemID string, interfaceName string, current []netlink.DefaultRoute, preferred []netlink.DefaultRoute, changes []defaultRouteChange) {
 	args := []any{
-		"modem", modemID,
+		"imei", modemID,
 		"interface", interfaceName,
 		"current", fmt.Sprintf("%+v", current),
 		"preferred", fmt.Sprintf("%+v", preferred),

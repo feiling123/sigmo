@@ -3,7 +3,6 @@ package esim
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"unicode/utf8"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
@@ -30,7 +29,7 @@ func (p *profile) List(modem *mmodem.Modem) ([]ProfileResponse, error) {
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("close LPA client", "error", cerr)
+			client.Logger().Warn("close LPA client", "error", cerr)
 		}
 	}()
 
@@ -64,7 +63,7 @@ func (p *profile) UpdateNickname(modem *mmodem.Modem, iccid sgp22.ICCID, nicknam
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("close LPA client", "error", cerr)
+			client.Logger().Warn("close LPA client", "error", cerr)
 		}
 	}()
 

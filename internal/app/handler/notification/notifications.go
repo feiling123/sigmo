@@ -2,7 +2,6 @@ package notification
 
 import (
 	"fmt"
-	"log/slog"
 	"strconv"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
@@ -27,7 +26,7 @@ func (n *notification) List(modem *mmodem.Modem) ([]NotificationResponse, error)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close LPA client", "error", cerr)
+			client.Logger().Warn("failed to close LPA client", "error", cerr)
 		}
 	}()
 	notifications, err := client.ListNotification()
@@ -54,7 +53,7 @@ func (n *notification) Resend(modem *mmodem.Modem, sequence sgp22.SequenceNumber
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close LPA client", "error", cerr)
+			client.Logger().Warn("failed to close LPA client", "error", cerr)
 		}
 	}()
 	if err := client.SendNotification(sequence, false); err != nil {
@@ -71,7 +70,7 @@ func (n *notification) Delete(modem *mmodem.Modem, sequence sgp22.SequenceNumber
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close LPA client", "error", cerr)
+			client.Logger().Warn("failed to close LPA client", "error", cerr)
 		}
 	}()
 	if err := client.RemoveNotificationFromList(sequence); err != nil {

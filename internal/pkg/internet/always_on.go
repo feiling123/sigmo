@@ -62,7 +62,7 @@ func (c *Connector) restoreAlwaysOnModems(ctx context.Context, registry *mmodem.
 			continue
 		}
 		if err := c.restoreAlwaysOn(ctx, access, prefs); err != nil {
-			slog.Warn("restore internet always on connection", "modem", modem.EquipmentIdentifier, "error", err)
+			slog.Warn("restore internet always on connection", "imei", modem.EquipmentIdentifier, "error", err)
 		}
 	}
 }

@@ -64,7 +64,7 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 		}
 		clientClosed = true
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close MSISDN client", "error", cerr, "modem", modem.EquipmentIdentifier)
+			slog.Warn("failed to close MSISDN client", "error", cerr, "imei", modem.EquipmentIdentifier)
 		}
 	}
 	defer func() {

@@ -31,6 +31,7 @@ var gmu = keymutex.New()
 type LPA struct {
 	*lpa.Client
 	lockKey string
+	logger  *slog.Logger
 }
 
 type Info struct {
@@ -38,6 +39,14 @@ type Info struct {
 	FreeSpace    int32
 	SASUP        euicc.SASUP
 	Certificates []string
+}
+
+type ChannelConfig struct {
+	LockKey  string
+	ConfigID string
+	Channel  apdu.SmartCardChannel
+	Settings *settings.Settings
+	Logger   *slog.Logger
 }
 
 var ErrNoSupportedAID = errors.New("no supported ISD-R AID found or it's not an eUICC")
@@ -58,7 +67,13 @@ func New(m *modem.Modem, currentSettings *settings.Settings) (*LPA, error) {
 		gmu.Unlock(m.EquipmentIdentifier)
 		return nil, err
 	}
-	instance, err := newWithChannelLocked(m.EquipmentIdentifier, m.EquipmentIdentifier, ch, currentSettings)
+	instance, err := newWithChannelLocked(ChannelConfig{
+		LockKey:  m.EquipmentIdentifier,
+		ConfigID: m.EquipmentIdentifier,
+		Channel:  ch,
+		Settings: currentSettings,
+		Logger:   m.Logger(),
+	})
 	if err != nil {
 		_ = ch.Disconnect()
 		gmu.Unlock(m.EquipmentIdentifier)
@@ -67,16 +82,19 @@ func New(m *modem.Modem, currentSettings *settings.Settings) (*LPA, error) {
 	return instance, nil
 }
 
-func NewWithChannel(lockKey, configID string, ch apdu.SmartCardChannel, currentSettings *settings.Settings) (*LPA, error) {
-	if lockKey != "" {
-		gmu.Lock(lockKey)
+func NewWithChannel(cfg ChannelConfig) (*LPA, error) {
+	if cfg.Channel == nil {
+		return nil, errors.New("lpa channel is required")
 	}
-	instance, err := newWithChannelLocked(lockKey, configID, ch, currentSettings)
+	if cfg.LockKey != "" {
+		gmu.Lock(cfg.LockKey)
+	}
+	instance, err := newWithChannelLocked(cfg)
 	if err != nil {
-		if lockKey != "" {
-			gmu.Unlock(lockKey)
+		if cfg.LockKey != "" {
+			gmu.Unlock(cfg.LockKey)
 		}
-		_ = ch.Disconnect()
+		_ = cfg.Channel.Disconnect()
 		return nil, err
 	}
 	return instance, nil
@@ -90,9 +108,10 @@ func NewChannel(m *modem.Modem) (apdu.SmartCardChannel, func(), error) {
 		return nil, nil, err
 	}
 	locked := &lockedChannel{SmartCardChannel: ch, key: m.EquipmentIdentifier}
+	logger := m.Logger()
 	release := func() {
 		if err := locked.Disconnect(); err != nil {
-			slog.Debug("disconnect LPA channel", "error", err)
+			logger.Debug("disconnect LPA channel", "error", err)
 		}
 	}
 	return locked, release, nil
@@ -120,12 +139,18 @@ func (c *lockedChannel) CloseLogicalChannel(channel byte) error {
 	return nil
 }
 
-func newWithChannelLocked(lockKey, configID string, ch apdu.SmartCardChannel, currentSettings *settings.Settings) (*LPA, error) {
-	instance := &LPA{lockKey: lockKey}
+func newWithChannelLocked(cfg ChannelConfig) (*LPA, error) {
+	logger := cfg.Logger
+	currentSettings := cfg.Settings
+	if currentSettings == nil {
+		currentSettings = settings.Default()
+	}
+	instance := &LPA{lockKey: cfg.LockKey, logger: logger}
 	opts := &lpa.Options{
-		Channel:              ch,
+		Channel:              cfg.Channel,
 		AdminProtocolVersion: "2.2.0",
-		MSS:                  currentSettings.FindModem(configID).MSS,
+		Logger:               logger,
+		MSS:                  currentSettings.FindModem(cfg.ConfigID).MSS,
 	}
 	if err := instance.tryCreateClient(opts); err != nil {
 		return nil, err
@@ -138,10 +163,10 @@ func (l *LPA) tryCreateClient(opts *lpa.Options) error {
 	for _, opts.AID = range AIDs {
 		l.Client, err = lpa.New(opts)
 		if err == nil {
-			slog.Info("LPA client created", "AID", fmt.Sprintf("%X", opts.AID))
+			l.logger.Info("LPA client created", "AID", fmt.Sprintf("%X", opts.AID))
 			return nil
 		}
-		slog.Warn("failed to create LPA client", "AID", fmt.Sprintf("%X", opts.AID), "error", err)
+		l.logger.Warn("failed to create LPA client", "AID", fmt.Sprintf("%X", opts.AID), "error", err)
 	}
 	return ErrNoSupportedAID
 }
@@ -153,10 +178,10 @@ func createChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
 	}
 	switch m.PrimaryPortType() {
 	case modem.ModemPortTypeQmi:
-		slog.Info("using QMI driver", "port", m.PrimaryPort, "slot", slot)
+		m.Logger().Info("using QMI driver", "port", m.PrimaryPort, "slot", slot)
 		return qmi.New(m.PrimaryPort, slot)
 	case modem.ModemPortTypeMbim:
-		slog.Info("using MBIM driver", "port", m.PrimaryPort, "slot", slot)
+		m.Logger().Info("using MBIM driver", "port", m.PrimaryPort, "slot", slot)
 		return mbim.New(m.PrimaryPort, slot)
 	default:
 		return createATChannel(m)
@@ -168,7 +193,7 @@ func createATChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
 	if err != nil {
 		return nil, err
 	}
-	slog.Info("using AT driver", "port", port.Device)
+	m.Logger().Info("using AT driver", "port", port.Device)
 	return at.New(port.Device)
 }
 
@@ -178,6 +203,10 @@ func (l *LPA) Close() error {
 		gmu.Unlock(l.lockKey)
 	}
 	return err
+}
+
+func (l *LPA) Logger() *slog.Logger {
+	return l.logger
 }
 
 func (l *LPA) Info() (*Info, error) {
@@ -233,7 +262,7 @@ func (l *LPA) Delete(id sgp22.ICCID) error {
 	var errs error
 	for _, n := range deletionNotifications {
 		if n.SequenceNumber > lastSeq && bytes.Equal(n.ICCID, id) {
-			slog.Info("sending deletion notification", "sequence", n.SequenceNumber)
+			l.logger.Info("sending deletion notification", "sequence", n.SequenceNumber)
 			if err := l.SendNotification(n.SequenceNumber, false); err != nil {
 				errs = errors.Join(errs, err)
 			}
@@ -262,13 +291,13 @@ func (l *LPA) SendNotification(searchCriteria any, delete bool) error {
 }
 
 func (l *LPA) Download(ctx context.Context, activationCode *lpa.ActivationCode, opts *lpa.DownloadOptions) error {
-	slog.Info("downloading profile", "activationCode", activationCode)
+	l.logger.Info("downloading profile", "activationCode", activationCode)
 	result, err := l.DownloadProfile(ctx, activationCode, opts)
 	if err != nil {
 		return err
 	}
 	if result != nil && result.Notification != nil && result.Notification.SequenceNumber > 0 {
-		slog.Info("sending download notification", "sequence", result.Notification.SequenceNumber)
+		l.logger.Info("sending download notification", "sequence", result.Notification.SequenceNumber)
 		if err := l.SendNotification(result.Notification.SequenceNumber, false); err != nil {
 			return err
 		}
@@ -284,7 +313,7 @@ func (l *LPA) Discovery(imei sgp22.IMEI) ([]*sgp22.EventEntry, error) {
 		{Scheme: "https", Host: "lpa.live.esimdiscovery.com"},
 	}
 	for _, address := range addresses {
-		slog.Info("discovering profiles", "address", address.Host)
+		l.logger.Info("discovering profiles", "address", address.Host)
 		discovered, err := l.Client.Discovery(&address, imei)
 		if err != nil {
 			errs = errors.Join(errs, fmt.Errorf("discover profiles from %s: %w", address.Host, err))

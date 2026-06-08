@@ -168,7 +168,7 @@ func (m *Registry) createModem(ctx context.Context, objectPath dbus.ObjectPath, 
 				return nil, fmt.Errorf("read primary SIM: %w", err)
 			}
 			modem.Sim, _ = modem.SIMs().Reference(primarySIMPath)
-			slog.Warn("read primary SIM", "path", primarySIMPath, "modem", modem.EquipmentIdentifier, "error", err)
+			slog.Warn("read primary SIM", "path", primarySIMPath, "imei", modem.EquipmentIdentifier, "error", err)
 		}
 	}
 	if numbers := variantStrings(data, "OwnNumbers"); len(numbers) > 0 {
@@ -367,7 +367,7 @@ func (m *Registry) waitForModemAfter(ctx context.Context, current *Modem, action
 				return nil, err
 			}
 			reload.mark()
-			slog.Info("waiting for modem after reload started", "modem", current.EquipmentIdentifier, "error", err)
+			slog.Info("waiting for modem after reload started", "imei", current.EquipmentIdentifier, "error", err)
 		}
 	} else if modem := m.findReadyModem(current, reload.observed()); modem != nil {
 		return modem, nil
@@ -412,7 +412,7 @@ func (m *Registry) waitForReadyModem(ctx context.Context, current *Modem, ready 
 		case <-ticker.C:
 			modem, missing, err := m.refreshReadyModem(ctx, current, reload.observed())
 			if err != nil {
-				slog.Warn("refresh modem while waiting", "modem", current.EquipmentIdentifier, "error", err)
+				slog.Warn("refresh modem while waiting", "imei", current.EquipmentIdentifier, "error", err)
 				continue
 			}
 			if missing {
@@ -535,7 +535,7 @@ func (m *Registry) deleteAndUpdate(modem *Modem) {
 	if modem.EquipmentIdentifier != "" {
 		for path, existing := range m.modems {
 			if existing.EquipmentIdentifier == modem.EquipmentIdentifier {
-				slog.Info("removing duplicate modem", "path", path, "equipmentIdentifier", modem.EquipmentIdentifier)
+				slog.Info("removing duplicate modem", "path", path, "imei", modem.EquipmentIdentifier)
 				delete(m.modems, path)
 			}
 		}

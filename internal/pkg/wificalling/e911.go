@@ -24,7 +24,7 @@ func (c *coordinator) StartEmergencyAddressUpdate(ctx context.Context, modem *mm
 	if err != nil {
 		return websheet.Info{}, err
 	}
-	supported, err := emergencyAddressUpdateAvailable(ctx, card)
+	supported, err := emergencyAddressUpdateAvailable(ctx, card, modem.Logger())
 	if err != nil {
 		return websheet.Info{}, err
 	}
@@ -46,18 +46,18 @@ func (c *coordinator) EmergencyAddressUpdateAvailable(ctx context.Context, modem
 	if err != nil {
 		return false
 	}
-	supported, err := emergencyAddressUpdateAvailable(ctx, card)
+	supported, err := emergencyAddressUpdateAvailable(ctx, card, modem.Logger())
 	if err != nil {
-		slog.Debug("check Wi-Fi Calling E911 update support", "error", err)
+		modem.Logger().Debug("check Wi-Fi Calling E911 update support", "error", err)
 		return false
 	}
 	return supported
 }
 
-func emergencyAddressUpdateAvailable(ctx context.Context, card wfcsetup.Card) (bool, error) {
+func emergencyAddressUpdateAvailable(ctx context.Context, card wfcsetup.Card, logger *slog.Logger) (bool, error) {
 	support, err := wfcsetup.CheckE911UpdateSupport(ctx, wfcsetup.Request{
 		Card:   card,
-		Logger: slog.Default(),
+		Logger: logger,
 	})
 	if err != nil {
 		return false, err
@@ -160,13 +160,13 @@ func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mm
 	defer func() {
 		_ = reader.Close()
 	}()
-	card, err := usim.New(ctx, reader, slog.Default())
-	if err != nil {
-		return wfcsetup.Result{}, fmt.Errorf("load Wi-Fi Calling SIM: %w", err)
-	}
 	cfg, err := modemClientConfig(ctx, modem)
 	if err != nil {
 		return wfcsetup.Result{}, err
+	}
+	card, err := usim.New(ctx, reader, cfg.Logger)
+	if err != nil {
+		return wfcsetup.Result{}, fmt.Errorf("load Wi-Fi Calling SIM: %w", err)
 	}
 
 	return wfcsetup.Check(ctx, wfcsetup.Request{

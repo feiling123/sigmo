@@ -3,7 +3,9 @@
 package wificalling
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
 	"slices"
 	"sort"
 	"strings"
@@ -62,6 +64,36 @@ func TestTerminalInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := terminalInfo(tt.imei); got != tt.want {
 				t.Fatalf("terminalInfo() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestModemClientConfigForIMEI(t *testing.T) {
+	tests := []struct {
+		name string
+		imei string
+	}{
+		{name: "uses IMEI for terminal and logger", imei: "123456789012345"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			defer slog.SetDefault(previous)
+
+			cfg := modemClientConfigForIMEI(tt.imei)
+			if cfg.Logger == nil {
+				t.Fatal("Logger = nil, want configured logger")
+			}
+			if cfg.Terminal.ID != tt.imei {
+				t.Fatalf("Terminal.ID = %q, want %q", cfg.Terminal.ID, tt.imei)
+			}
+			cfg.Logger.Info("config log")
+			if !strings.Contains(logs.String(), "imei="+tt.imei) {
+				t.Fatalf("logs = %s, want IMEI field", logs.String())
 			}
 		})
 	}

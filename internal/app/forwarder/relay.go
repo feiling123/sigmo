@@ -129,7 +129,7 @@ func (r *Relay) addModem(ctx context.Context, path dbus.ObjectPath, m *modem.Mod
 		if err := m.Messaging().Subscribe(modemCtx, func(message *modem.SMS) error {
 			return r.forwardModemSMS(modemCtx, m, message)
 		}); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Error("modem message subscription stopped", "error", err, "modem", m.EquipmentIdentifier)
+			slog.Error("modem message subscription stopped", "error", err, "imei", m.EquipmentIdentifier)
 		}
 		r.removeModem(path)
 	}()
@@ -168,7 +168,7 @@ func (r *Relay) stopAll() {
 
 func (r *Relay) ForwardWiFiCallingSMS(ctx context.Context, incoming wificalling.IncomingSMS) error {
 	if !freshIncomingMessage(incoming.Message, time.Now()) {
-		slog.Debug("skipping stale Wi-Fi Calling SMS", "modem", incoming.ModemID, "externalKey", incoming.Message.ExternalKey, "timestamp", incoming.Message.Timestamp)
+		slog.Debug("skipping stale Wi-Fi Calling SMS", "imei", incoming.ModemID, "externalKey", incoming.Message.ExternalKey, "timestamp", incoming.Message.Timestamp)
 		return nil
 	}
 	inserted, err := r.messages.InsertMessage(ctx, incoming.Message)
@@ -176,7 +176,7 @@ func (r *Relay) ForwardWiFiCallingSMS(ctx context.Context, incoming wificalling.
 		return err
 	}
 	if !inserted {
-		slog.Debug("skipping known Wi-Fi Calling SMS", "modem", incoming.ModemID, "externalKey", incoming.Message.ExternalKey)
+		slog.Debug("skipping known Wi-Fi Calling SMS", "imei", incoming.ModemID, "externalKey", incoming.Message.ExternalKey)
 		return nil
 	}
 	r.mu.Lock()
@@ -198,7 +198,7 @@ func (r *Relay) ForwardCalls(ctx context.Context, calls *pcall.Service) error {
 			return nil
 		case event := <-events:
 			if err := r.ForwardCall(ctx, event.Call); err != nil {
-				slog.Warn("forward call notification", "call_id", event.Call.ID, "modem", event.Call.ModemID, "error", err)
+				slog.Warn("forward call notification", "call_id", event.Call.ID, "imei", event.Call.ModemID, "error", err)
 			}
 		}
 	}
@@ -209,7 +209,7 @@ func (r *Relay) ForwardCall(ctx context.Context, call storage.Call) error {
 		return nil
 	}
 	if !r.reserveCallNotification(call.ID) {
-		slog.Debug("skipping known incoming call", "modem", call.ModemID, "call_id", call.ID)
+		slog.Debug("skipping known incoming call", "imei", call.ModemID, "call_id", call.ID)
 		return nil
 	}
 
@@ -230,7 +230,7 @@ func (r *Relay) forwardModemSMS(ctx context.Context, m *modem.Modem, message *mo
 	}
 	stored := storageMessageFromModemSMS(m, profileID, message)
 	if !freshIncomingMessage(stored, time.Now()) {
-		slog.Debug("skipping stale modem SMS", "modem", m.EquipmentIdentifier, "path", message.Path(), "timestamp", message.Timestamp)
+		slog.Debug("skipping stale modem SMS", "imei", m.EquipmentIdentifier, "path", message.Path(), "timestamp", message.Timestamp)
 		return nil
 	}
 	inserted, err := r.messages.InsertMessage(ctx, stored)
@@ -238,7 +238,7 @@ func (r *Relay) forwardModemSMS(ctx context.Context, m *modem.Modem, message *mo
 		return err
 	}
 	if !inserted {
-		slog.Debug("skipping known modem SMS", "modem", m.EquipmentIdentifier, "path", message.Path())
+		slog.Debug("skipping known modem SMS", "imei", m.EquipmentIdentifier, "path", message.Path())
 		return nil
 	}
 	r.mu.Lock()

@@ -140,7 +140,7 @@ func (c *coordinator) trackOutgoingSMSSubmission(msg storage.Message, submission
 func (c *coordinator) forwardSMSReport(ctx context.Context, modemID string, profileID string, report vowifi.SMSReport) {
 	_ = ctx
 	slog.Info("Wi-Fi Calling SMS report",
-		"modem", modemID,
+		"imei", modemID,
 		"profile_id", profileID,
 		"submission_id", report.SubmissionID,
 		"segment", report.SegmentIndex+1,
@@ -195,7 +195,7 @@ func (c *coordinator) watchSMSSubmissionUpdatesWithTimeout(modemID string, profi
 			c.updateStoredSMSStatus(modemID, update.Recipient, statusUpdate)
 		case <-timer.C:
 			slog.Warn("wait Wi-Fi Calling SMS delivery report",
-				"modem", modemID,
+				"imei", modemID,
 				"profile_id", profileID,
 				"submission_id", submission.ID,
 				"timeout", timeout,
@@ -207,7 +207,7 @@ func (c *coordinator) watchSMSSubmissionUpdatesWithTimeout(modemID string, profi
 
 func logSMSSubmissionUpdate(modemID string, profileID string, update vowifi.SMSSubmissionUpdate) {
 	attrs := []any{
-		"modem", modemID,
+		"imei", modemID,
 		"profile_id", profileID,
 		"submission_id", update.SubmissionID,
 		"segment", update.SegmentIndex + 1,
@@ -283,10 +283,10 @@ func (c *coordinator) updateStoredSMSStatus(modemID string, recipient string, up
 		ExternalKey: update.externalKey,
 		Status:      update.status,
 	}); err != nil {
-		slog.Warn("update Wi-Fi Calling SMS status", "modem", modemID, "recipient", recipient, "status", update.status, "error", err)
+		slog.Warn("update Wi-Fi Calling SMS status", "imei", modemID, "recipient", recipient, "status", update.status, "error", err)
 	} else if !updated {
 		c.deferStoredSMSStatus(update)
-		slog.Debug("Wi-Fi Calling SMS status target not yet stored", "modem", modemID, "recipient", recipient, "status", update.status)
+		slog.Debug("Wi-Fi Calling SMS status target not yet stored", "imei", modemID, "recipient", recipient, "status", update.status)
 	} else {
 		c.completeStoredSMSStatus(update)
 	}
@@ -430,7 +430,7 @@ func (c *coordinator) forwardIncoming(ctx context.Context, modem *mmodem.Modem, 
 		WiFiCalling: true,
 	}
 	if err := c.onIncoming(ctx, IncomingSMS{ModemID: modem.EquipmentIdentifier, Message: stored}); err != nil {
-		slog.Warn("forward Wi-Fi Calling SMS", "modem", modem.EquipmentIdentifier, "error", err)
+		slog.Warn("forward Wi-Fi Calling SMS", "imei", modem.EquipmentIdentifier, "error", err)
 	}
 }
 

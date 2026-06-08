@@ -75,9 +75,9 @@ func (r *registrationRestorer) restoreWithRetry(ctx context.Context, modem *mmod
 			return
 		}
 		if warned {
-			slog.Debug("retry network registration restore", "modem", modem.EquipmentIdentifier, "error", err)
+			slog.Debug("retry network registration restore", "imei", modem.EquipmentIdentifier, "error", err)
 		} else {
-			slog.Warn("restore network registration", "modem", modem.EquipmentIdentifier, "error", err)
+			slog.Warn("restore network registration", "imei", modem.EquipmentIdentifier, "error", err)
 			warned = true
 		}
 		if err := sleepContext(ctx, networkRegistrationRestoreRetryInterval); err != nil {

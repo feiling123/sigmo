@@ -1,9 +1,14 @@
 package lpa
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
+
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 func TestLockedChannelDisconnectOnce(t *testing.T) {
@@ -70,6 +75,67 @@ func TestLockedChannelCloseLogicalChannelReleasesOnError(t *testing.T) {
 	assertLockReleased(t, key)
 }
 
+func TestNewWithChannelLogger(t *testing.T) {
+	tests := []struct {
+		name    string
+		channel *fakeSmartCardChannel
+		run     func(t *testing.T, client *LPA)
+		want    string
+		wantErr error
+	}{
+		{
+			name:    "LPA creation logs IMEI",
+			channel: &fakeSmartCardChannel{openLogicalChannelErr: errFakeOpenLogicalChannel},
+			want:    "msg=\"failed to create LPA client\"",
+			wantErr: ErrNoSupportedAID,
+		},
+		{
+			name:    "euicc APDU logs IMEI",
+			channel: &fakeSmartCardChannel{logicalChannel: 1},
+			run: func(t *testing.T, client *LPA) {
+				t.Helper()
+				if _, err := client.APDU.TransmitRaw([]byte{0x01}); err != nil {
+					t.Fatalf("TransmitRaw() error = %v", err)
+				}
+			},
+			want: "msg=\"[APDU] sending\"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			defer slog.SetDefault(previous)
+
+			client, err := NewWithChannel(ChannelConfig{
+				LockKey: "test:" + tt.name,
+				Channel: tt.channel,
+				Logger:  mmodem.LoggerForIMEI("860588043408833"),
+			})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("NewWithChannel() error = %v, want %v", err, tt.wantErr)
+			}
+			if err == nil {
+				defer func() {
+					if cerr := client.Close(); cerr != nil {
+						t.Fatalf("Close() error = %v", cerr)
+					}
+				}()
+				tt.run(t, client)
+			}
+
+			got := logs.String()
+			for _, want := range []string{tt.want, "imei=860588043408833"} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("logs = %s, want it to contain %q", got, want)
+				}
+			}
+		})
+	}
+}
+
 func assertLockReleased(t *testing.T, key string) {
 	t.Helper()
 
@@ -89,10 +155,13 @@ func assertLockReleased(t *testing.T, key string) {
 
 var errFakeDisconnect = errors.New("disconnect")
 var errFakeCloseLogicalChannel = errors.New("close logical channel")
+var errFakeOpenLogicalChannel = errors.New("open logical channel")
 
 type fakeSmartCardChannel struct {
 	disconnectErr          error
 	closeLogicalChannelErr error
+	openLogicalChannelErr  error
+	logicalChannel         byte
 	disconnects            int
 }
 
@@ -106,11 +175,17 @@ func (f *fakeSmartCardChannel) Disconnect() error {
 }
 
 func (f *fakeSmartCardChannel) OpenLogicalChannel([]byte) (byte, error) {
-	return 0, nil
+	if f.openLogicalChannelErr != nil {
+		return 0, f.openLogicalChannelErr
+	}
+	if f.logicalChannel != 0 {
+		return f.logicalChannel, nil
+	}
+	return 1, nil
 }
 
 func (f *fakeSmartCardChannel) Transmit([]byte) ([]byte, error) {
-	return nil, nil
+	return []byte{0x90, 0x00}, nil
 }
 
 func (f *fakeSmartCardChannel) CloseLogicalChannel(byte) error {

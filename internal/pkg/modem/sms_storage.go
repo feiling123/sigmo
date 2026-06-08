@@ -24,9 +24,9 @@ func setDefaultSMSStorage(ctx context.Context, m *Modem, storage SMSStorage) {
 				return
 			}
 			if warned {
-				slog.Debug("retry SMS default storage", "modem", m.EquipmentIdentifier, "storage", storage.String(), "error", err)
+				slog.Debug("retry SMS default storage", "imei", m.EquipmentIdentifier, "storage", storage.String(), "error", err)
 			} else {
-				slog.Warn("set SMS default storage", "modem", m.EquipmentIdentifier, "storage", storage.String(), "error", err)
+				slog.Warn("set SMS default storage", "imei", m.EquipmentIdentifier, "storage", storage.String(), "error", err)
 				warned = true
 			}
 			if err := sleepContext(ctx, smsStorageRetryInterval); err != nil {
@@ -45,7 +45,7 @@ func setDefaultSMSStorageOnce(ctx context.Context, m *Modem, storage SMSStorage)
 		return err
 	}
 	if !slices.Contains(supported, storage) {
-		slog.Info("SMS default storage unsupported", "modem", m.EquipmentIdentifier, "storage", storage.String(), "supported", supported)
+		slog.Info("SMS default storage unsupported", "imei", m.EquipmentIdentifier, "storage", storage.String(), "supported", supported)
 		return nil
 	}
 
@@ -54,13 +54,13 @@ func setDefaultSMSStorageOnce(ctx context.Context, m *Modem, storage SMSStorage)
 		return err
 	}
 	if current == storage {
-		slog.Debug("SMS default storage already configured", "modem", m.EquipmentIdentifier, "storage", storage.String())
+		slog.Debug("SMS default storage already configured", "imei", m.EquipmentIdentifier, "storage", storage.String())
 		return nil
 	}
 
 	if err := messaging.SetDefaultStorage(ctx, storage); err != nil {
 		return err
 	}
-	slog.Info("SMS default storage set", "modem", m.EquipmentIdentifier, "storage", storage.String())
+	slog.Info("SMS default storage set", "imei", m.EquipmentIdentifier, "storage", storage.String())
 	return nil
 }

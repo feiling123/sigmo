@@ -45,12 +45,12 @@ func (c *coordinator) startEnabled(ctx context.Context, registry *mmodem.Registr
 func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
-		slog.Debug("skip Wi-Fi Calling start", "modem", modem.EquipmentIdentifier, "error", err)
+		slog.Debug("skip Wi-Fi Calling start", "imei", modem.EquipmentIdentifier, "error", err)
 		return
 	}
 	settings, err := c.settings.Get(ctx, profileID)
 	if err != nil {
-		slog.Warn("read Wi-Fi Calling settings", "modem", modem.EquipmentIdentifier, "error", err)
+		slog.Warn("read Wi-Fi Calling settings", "imei", modem.EquipmentIdentifier, "error", err)
 		return
 	}
 	if settings.Enabled {
@@ -100,7 +100,7 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 		}
 		c.markConnecting(modem.EquipmentIdentifier)
 		delay := retryDelays[0]
-		slog.Warn("Wi-Fi Calling disconnected", "modem", modem.EquipmentIdentifier, "retryIn", delay)
+		slog.Warn("Wi-Fi Calling disconnected", "imei", modem.EquipmentIdentifier, "retryIn", delay)
 		if err := sleep(ctx, delay); err != nil {
 			return
 		}
@@ -118,10 +118,10 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem)
 			return nil, ctx.Err()
 		}
 		if errors.Is(err, wfcsetup.ErrUserActionRequired) {
-			slog.Warn("Wi-Fi Calling requires carrier websheet", "modem", modem.EquipmentIdentifier, "error", err)
+			slog.Warn("Wi-Fi Calling requires carrier websheet", "imei", modem.EquipmentIdentifier, "error", err)
 			if err := c.waitForWebsheet(ctx, modem.EquipmentIdentifier); err != nil {
 				if errors.Is(err, ErrWebsheetDismissed) {
-					slog.Info("Wi-Fi Calling carrier websheet dismissed", "modem", modem.EquipmentIdentifier)
+					slog.Info("Wi-Fi Calling carrier websheet dismissed", "imei", modem.EquipmentIdentifier)
 					c.stopAsync(modem.EquipmentIdentifier)
 				}
 				return nil, err
@@ -130,12 +130,12 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem)
 			continue
 		}
 		if attempt >= len(retryDelays) {
-			slog.Warn("Wi-Fi Calling connection attempts exhausted", "modem", modem.EquipmentIdentifier, "error", err)
+			slog.Warn("Wi-Fi Calling connection attempts exhausted", "imei", modem.EquipmentIdentifier, "error", err)
 			return nil, err
 		}
 		delay := retryDelays[attempt]
 		attempt++
-		slog.Warn("Wi-Fi Calling connect", "modem", modem.EquipmentIdentifier, "retryIn", delay, "error", err)
+		slog.Warn("Wi-Fi Calling connect", "imei", modem.EquipmentIdentifier, "retryIn", delay, "error", err)
 		if err := sleep(ctx, delay); err != nil {
 			return nil, err
 		}
@@ -175,14 +175,18 @@ func modemClientConfig(ctx context.Context, modem *mmodem.Modem) (*vowifi.Config
 	if err != nil {
 		return nil, fmt.Errorf("read modem IMEI: %w", err)
 	}
+	return modemClientConfigForIMEI(imei), nil
+}
+
+func modemClientConfigForIMEI(imei string) *vowifi.Config {
 	return &vowifi.Config{
-		Logger:   slog.Default(),
+		Logger:   mmodem.LoggerForIMEI(imei),
 		Terminal: terminalInfo(imei),
 		IMS: vowifi.IMSConfig{
 			SMSDeliveryReportTimeout: smsDeliveryReportTimeout(),
 			Voice:                    browserVoiceConfig(),
 		},
-	}, nil
+	}
 }
 
 func terminalInfo(imei string) vowifi.TerminalInfo {

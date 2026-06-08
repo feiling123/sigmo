@@ -156,7 +156,7 @@ func (c *catalog) buildLockedResponse(device *mmodem.Modem) (*ModemResponse, err
 	}
 	supportsEsim, err := supportsEsim(device, c.store)
 	if err != nil && !errors.Is(err, lpa.ErrNoSupportedAID) {
-		slog.Warn("detect eSIM support for locked modem", "modem", device.EquipmentIdentifier, "error", err)
+		slog.Warn("detect eSIM support for locked modem", "imei", device.EquipmentIdentifier, "error", err)
 	}
 	return &ModemResponse{
 		Manufacturer:     device.Manufacturer,
@@ -247,7 +247,7 @@ func supportsEsim(m *mmodem.Modem, store *settings.Store) (bool, error) {
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close LPA client", "error", cerr)
+			client.Logger().Warn("failed to close LPA client", "error", cerr)
 		}
 	}()
 	return true, nil

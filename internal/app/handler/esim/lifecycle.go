@@ -144,7 +144,7 @@ func (s *enableSession) Enable(ctx context.Context) error {
 	s.Close()
 
 	if err := s.l.restartModem(ctx, s.modem, s.l.findModemConfig(s.modem.EquipmentIdentifier).Compatible); err != nil {
-		slog.Warn("restart modem after enabling profile", "modem", s.modem.EquipmentIdentifier, "error", err)
+		slog.Warn("restart modem after enabling profile", "imei", s.modem.EquipmentIdentifier, "error", err)
 	}
 
 	if err := s.finish(ctx); err != nil {
@@ -159,7 +159,7 @@ func (s *enableSession) finish(ctx context.Context) error {
 		return fmt.Errorf("wait for modem readiness: %w", err)
 	}
 	if err := s.l.sendPendingNotifications(target, s.lastSeq); err != nil {
-		slog.Warn("failed to handle modem notifications", "error", err, "modem", s.modem.EquipmentIdentifier)
+		slog.Warn("failed to handle modem notifications", "error", err, "imei", s.modem.EquipmentIdentifier)
 	}
 	return nil
 }
@@ -195,7 +195,7 @@ func (s *enableSession) Close() {
 		return
 	}
 	if err := s.client.Close(); err != nil {
-		slog.Warn("failed to close LPA client", "error", err)
+		s.modem.Logger().Warn("failed to close LPA client", "error", err)
 	}
 	s.client = nil
 }
@@ -208,7 +208,7 @@ func (l *lifecycle) Delete(modem *mmodem.Modem, iccid sgp22.ICCID) error {
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close LPA client", "error", cerr)
+			modem.Logger().Warn("failed to close LPA client", "error", cerr)
 		}
 	}()
 
@@ -251,7 +251,7 @@ func (l *lifecycle) sendPendingNotifications(modem *mmodem.Modem, lastSeq sgp22.
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close LPA client", "error", cerr)
+			modem.Logger().Warn("failed to close LPA client", "error", cerr)
 		}
 	}()
 	notifications, err := client.ListNotification()

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 
 	elpa "github.com/damonto/euicc-go/lpa"
 	sgp22 "github.com/damonto/euicc-go/v2"
@@ -30,7 +29,7 @@ func (s *Service) downloadEnableAndComplete(ctx context.Context, session *sessio
 	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stageCompleting})
 	next, err := active.client.CompleteActivation(ctx, result, ts43.ActivationResult{ICCID: iccid.String()})
 	if err != nil {
-		slog.Warn("complete TS.43 activation", "iccid", iccid.String(), "error", err)
+		active.Logger().Warn("complete TS.43 activation", "iccid", iccid.String(), "error", err)
 	}
 	return next, err
 }

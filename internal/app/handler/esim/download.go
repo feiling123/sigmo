@@ -3,7 +3,6 @@ package esim
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	elpa "github.com/damonto/euicc-go/lpa"
 
@@ -19,7 +18,7 @@ func (p *provisioning) Download(ctx context.Context, modem *mmodem.Modem, activa
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("close LPA client", "error", cerr)
+			client.Logger().Warn("close LPA client", "error", cerr)
 		}
 	}()
 

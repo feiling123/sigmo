@@ -121,6 +121,7 @@ type activeSession struct {
 	target       *mmodem.Modem
 	targetClient *ilpa.LPA
 	client       *ts43.Client
+	logger       *slog.Logger
 	targetClosed bool
 }
 
@@ -138,8 +139,12 @@ func (t *activeSession) CloseTarget() {
 	}
 	t.targetClosed = true
 	if cerr := t.targetClient.Close(); cerr != nil {
-		slog.Warn("close target LPA client", "error", cerr)
+		t.Logger().Warn("close target LPA client", "error", cerr)
 	}
+}
+
+func (t *activeSession) Logger() *slog.Logger {
+	return t.logger
 }
 
 func (s *Service) Sources(ctx context.Context, target *mmodem.Modem) (SourcesResponse, error) {
@@ -317,7 +322,7 @@ func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start
 	defer func() {
 		if releaseTarget {
 			if cerr := targetClient.Close(); cerr != nil {
-				slog.Warn("close target LPA client", "error", cerr)
+				targetClient.Logger().Warn("close target LPA client", "error", cerr)
 			}
 		}
 	}()
@@ -332,8 +337,9 @@ func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start
 	}
 	targetDevice := ts43Device(targetIMEI)
 	targetDevice.EID = strings.ToUpper(hex.EncodeToString(eid))
+	logger := transferLogger(targetIMEI, source.device.IMEI)
 	client, err := ts43.New(&ts43.Config{
-		Logger:      slog.Default(),
+		Logger:      logger,
 		Entitlement: ts43.Entitlement{SourceSIMType: source.sourceSIMType},
 		Source:      ts43.Endpoint{Channel: source.channel, Device: source.device},
 		Target: ts43.Endpoint{
@@ -352,41 +358,42 @@ func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start
 		target:       target,
 		targetClient: targetClient,
 		client:       client,
+		logger:       logger,
 	}, nil
 }
 
 func (s *Service) handleEvent(ctx context.Context, session *session, active *activeSession, start Start, result *ts43.Result) (*ts43.Result, bool, error) {
 	switch event := result.Event.(type) {
 	case ts43.UserInputEvent:
-		slog.Info("TS.43 transfer requires user input")
+		active.Logger().Info("TS.43 transfer requires user input")
 		answer, err := session.userInput(ctx, event)
 		if err != nil {
-			slog.Warn("TS.43 user input interrupted", "error", err)
+			active.Logger().Warn("TS.43 user input interrupted", "error", err)
 			return result, false, err
 		}
 		next, err := active.client.Continue(ctx, result, ts43.ContinueRequest{UserInput: answer})
 		if err != nil {
-			slog.Warn("continue TS.43 transfer after user input", "error", err)
+			active.Logger().Warn("continue TS.43 transfer after user input", "error", err)
 		}
 		return next, false, err
 	case ts43.WebsheetEvent:
 		next, err := s.handleWebsheet(ctx, session, active, result, event)
 		if err != nil {
-			slog.Warn("handle TS.43 websheet", "contentType", event.Websheet.ContentsType, "error", err)
+			active.Logger().Warn("handle TS.43 websheet", "contentType", event.Websheet.ContentsType, "error", err)
 		}
 		return next, false, err
 	case ts43.SourceProfileDeletionEvent:
-		slog.Info("TS.43 transfer requires source profile deletion", "iccid", event.ICCID)
+		active.Logger().Info("TS.43 transfer requires source profile deletion", "iccid", event.ICCID)
 		next, err := s.handleSourceProfileDeletion(ctx, session, active, start, result, event)
 		if err != nil {
-			slog.Warn("handle TS.43 source profile deletion", "iccid", event.ICCID, "error", err)
+			active.Logger().Warn("handle TS.43 source profile deletion", "iccid", event.ICCID, "error", err)
 		}
 		return next, false, err
 	case ts43.DownloadReadyEvent:
-		slog.Info("TS.43 transfer download is ready", "smdp", event.Config.SMDPFQDN, "profileICCID", event.Config.ProfileICCID)
+		active.Logger().Info("TS.43 transfer download is ready", "smdp", event.Config.SMDPFQDN, "profileICCID", event.Config.ProfileICCID)
 		next, err := s.downloadEnableAndComplete(ctx, session, active, result, event.Config)
 		if err != nil {
-			slog.Warn("download TS.43 transferred profile", "error", err)
+			active.Logger().Warn("download TS.43 transferred profile", "error", err)
 		}
 		return next, false, err
 	case ts43.SMDSDiscoveryEvent:
@@ -396,30 +403,30 @@ func (s *Service) handleEvent(ctx context.Context, session *session, active *act
 		next, err := s.handleSMDSDiscovery(ctx, session, active, result, smdsDiscoveryEventFromDelayedDownload(event))
 		return next, false, err
 	case ts43.ActivationPendingEvent:
-		slog.Info("TS.43 transfer activation is pending", "iccid", event.ICCID, "subscriptionResult", event.SubscriptionResult)
+		active.Logger().Info("TS.43 transfer activation is pending", "iccid", event.ICCID, "subscriptionResult", event.SubscriptionResult)
 		return result, true, nil
 	case ts43.DoneEvent:
-		slog.Info("TS.43 transfer completed")
+		active.Logger().Info("TS.43 transfer completed")
 		return result, true, nil
 	case ts43.DismissEvent:
-		slog.Warn("TS.43 transfer dismissed by carrier", "subscriptionResult", event.SubscriptionResult)
+		active.Logger().Warn("TS.43 transfer dismissed by carrier", "subscriptionResult", event.SubscriptionResult)
 		return result, false, errCarrierDismissed
 	default:
-		slog.Warn("unexpected TS.43 transfer event", "event", fmt.Sprintf("%T", result.Event))
+		active.Logger().Warn("unexpected TS.43 transfer event", "event", fmt.Sprintf("%T", result.Event))
 		return result, false, fmt.Errorf("unexpected TS.43 event %T", result.Event)
 	}
 }
 
 func (s *Service) handleSMDSDiscovery(ctx context.Context, session *session, active *activeSession, result *ts43.Result, event ts43.SMDSDiscoveryEvent) (*ts43.Result, error) {
-	slog.Info("TS.43 transfer requires SM-DS discovery", "targetEID", event.TargetEID, "subscriptionResult", event.SubscriptionResult)
+	active.Logger().Info("TS.43 transfer requires SM-DS discovery", "targetEID", event.TargetEID, "subscriptionResult", event.SubscriptionResult)
 	downloadConfig, err := smdsDownloadConfig(ctx, active.targetClient, event)
 	if err != nil {
-		slog.Warn("resolve TS.43 SM-DS download config", "error", err)
+		active.Logger().Warn("resolve TS.43 SM-DS download config", "error", err)
 		return result, err
 	}
 	next, err := s.downloadEnableAndComplete(ctx, session, active, result, downloadConfig)
 	if err != nil {
-		slog.Warn("download TS.43 SM-DS transferred profile", "error", err)
+		active.Logger().Warn("download TS.43 SM-DS transferred profile", "error", err)
 	}
 	return next, err
 }
@@ -443,6 +450,15 @@ func ts43Device(imei string) ts43.Device {
 		Model:           ts43DeviceModel,
 		SoftwareVersion: ts43DeviceSoftwareVersion,
 	}
+}
+
+func transferLogger(targetIMEI, sourceIMEI string) *slog.Logger {
+	logger := mmodem.LoggerForIMEI(targetIMEI)
+	sourceIMEI = strings.TrimSpace(sourceIMEI)
+	if sourceIMEI != "" {
+		logger = logger.With("source_imei", sourceIMEI)
+	}
+	return logger
 }
 
 func ts43SourceSIMType(profileType ProfileType) ts43.SIMType {

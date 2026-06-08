@@ -3,7 +3,6 @@ package euicc
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -31,7 +30,7 @@ func (e *euicc) Get(modem *mmodem.Modem) (*EuiccResponse, error) {
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close LPA client", "error", cerr)
+			client.Logger().Warn("failed to close LPA client", "error", cerr)
 		}
 	}()
 

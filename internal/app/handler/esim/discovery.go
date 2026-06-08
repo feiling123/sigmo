@@ -3,7 +3,6 @@ package esim
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
 
@@ -28,7 +27,7 @@ func (p *provisioning) Discovery(ctx context.Context, modem *mmodem.Modem) ([]Di
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("close LPA client", "error", cerr)
+			client.Logger().Warn("close LPA client", "error", cerr)
 		}
 	}()
 

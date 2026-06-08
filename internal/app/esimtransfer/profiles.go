@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
@@ -57,7 +56,7 @@ func (s *Service) modemProfileCandidates(ctx context.Context, currentSettings *s
 }
 
 func (s *Service) ccidProfileCandidates(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]profileCandidate, error) {
-	profiles, err := sourceCCIDProfiles(currentSettings, req.SourceID)
+	profiles, err := sourceCCIDProfiles(currentSettings, req)
 	if err == nil {
 		return esimCandidates(profiles), nil
 	}
@@ -86,18 +85,27 @@ func (s *Service) physicalProfileCandidates(ctx context.Context, currentSettings
 	return []profileCandidate{candidate}, nil
 }
 
-func sourceCCIDProfiles(currentSettings *settings.Settings, sourceID string) ([]*sgp22.ProfileInfo, error) {
-	reader, err := openCCIDLPAReader(sourceID)
+func sourceCCIDProfiles(currentSettings *settings.Settings, req ProfilesRequest) ([]*sgp22.ProfileInfo, error) {
+	reader, err := openCCIDLPAReader(req.SourceID)
 	if err != nil {
 		return nil, fmt.Errorf("open CCID reader: %w", err)
 	}
-	client, err := ilpa.NewWithChannel(sourceLockKey(SourceCCID, sourceID), "", reader, currentSettings)
+	client, err := ilpa.NewWithChannel(ilpa.ChannelConfig{
+		LockKey:  sourceLockKey(SourceCCID, req.SourceID),
+		Channel:  reader,
+		Settings: currentSettings,
+		Logger: sourceLogger(Start{
+			SourceType: SourceCCID,
+			SourceID:   req.SourceID,
+			SourceIMEI: req.SourceIMEI,
+		}),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create source LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("close source LPA client", "error", cerr)
+			client.Logger().Warn("close source LPA client", "error", cerr)
 		}
 	}()
 	profiles, err := client.ListProfile(nil, nil)

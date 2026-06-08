@@ -47,7 +47,7 @@ func (s *Service) openSource(ctx context.Context, currentSettings *settings.Sett
 			device:  device,
 		}, nil
 	case SourceCCID:
-		channel, release, err := openCCIDSource(ctx, start.SourceID)
+		channel, release, err := openCCIDSource(ctx, start.SourceID, sourceLogger(start))
 		if err != nil {
 			return nil, fmt.Errorf("open CCID reader: %w", err)
 		}
@@ -66,19 +66,20 @@ func openModemSource(ctx context.Context, modem *mmodem.Modem) (ts43.Channel, fu
 	if err != nil {
 		return nil, nil, err
 	}
+	logger := modem.Logger()
 	switch sourcePort.portType {
 	case mmodem.ModemPortTypeQmi:
 		reader, err := openQMISource(ctx, sourcePort.device, sourcePort.slot)
 		if err != nil {
 			return nil, nil, err
 		}
-		return sourceFromReader(ctx, reader)
+		return sourceFromReader(ctx, reader, logger)
 	case mmodem.ModemPortTypeAt:
 		reader, err := openATSource(ctx, sourcePort.device)
 		if err != nil {
 			return nil, nil, err
 		}
-		return sourceFromReader(ctx, reader)
+		return sourceFromReader(ctx, reader, logger)
 	default:
 		return nil, nil, errors.New("modem source port type is unsupported")
 	}
@@ -111,15 +112,15 @@ type sourceCloser interface {
 	Close() error
 }
 
-func releaseSource(ch sourceCloser) func() {
+func releaseSource(ch sourceCloser, logger *slog.Logger) func() {
 	return func() {
 		if err := ch.Close(); err != nil {
-			slog.Debug("disconnect transfer source", "error", err)
+			logger.Debug("disconnect transfer source", "error", err)
 		}
 	}
 }
 
-func openCCIDSource(ctx context.Context, readerName string) (ts43.Channel, func(), error) {
+func openCCIDSource(ctx context.Context, readerName string, logger *slog.Logger) (ts43.Channel, func(), error) {
 	tx, err := ccid.Open(ctx, readerName)
 	if err != nil {
 		return nil, nil, err
@@ -128,7 +129,7 @@ func openCCIDSource(ctx context.Context, readerName string) (ts43.Channel, func(
 	if err != nil {
 		return nil, nil, errors.Join(err, tx.Close())
 	}
-	return sourceFromReader(ctx, reader)
+	return sourceFromReader(ctx, reader, logger)
 }
 
 func openATSource(ctx context.Context, device string) (usimcard.Reader, error) {
@@ -165,8 +166,8 @@ func openQMISource(ctx context.Context, device string, slot int) (usimcard.Reade
 	return adapter, nil
 }
 
-func sourceFromReader(ctx context.Context, reader usimcard.Reader) (ts43.Channel, func(), error) {
-	card, err := usim.New(ctx, reader, slog.Default())
+func sourceFromReader(ctx context.Context, reader usimcard.Reader, logger *slog.Logger) (ts43.Channel, func(), error) {
+	card, err := usim.New(ctx, reader, logger)
 	if err != nil {
 		return nil, nil, errors.Join(err, reader.Close())
 	}
@@ -174,7 +175,7 @@ func sourceFromReader(ctx context.Context, reader usimcard.Reader) (ts43.Channel
 	if err != nil {
 		return nil, nil, errors.Join(err, card.Close())
 	}
-	return source, releaseSource(source), nil
+	return source, releaseSource(source, logger), nil
 }
 
 func (s *Service) activateSourceProfile(ctx context.Context, currentSettings *settings.Settings, start Start, candidate profileCandidate) error {
@@ -204,13 +205,19 @@ func enableCCIDSourceProfile(currentSettings *settings.Settings, start Start, ic
 	if err != nil {
 		return fmt.Errorf("open CCID reader: %w", err)
 	}
-	client, err := ilpa.NewWithChannel(sourceLockKey(start.SourceType, start.SourceID), "", reader, currentSettings)
+	logger := sourceLogger(start)
+	client, err := ilpa.NewWithChannel(ilpa.ChannelConfig{
+		LockKey:  sourceLockKey(start.SourceType, start.SourceID),
+		Channel:  reader,
+		Settings: currentSettings,
+		Logger:   logger,
+	})
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("close source LPA client", "error", cerr)
+			client.Logger().Warn("close source LPA client", "error", cerr)
 		}
 	}()
 	profiles, err := client.ListProfile(iccid, nil)
@@ -269,7 +276,7 @@ func (s *Service) deleteModemSourceProfile(ctx context.Context, currentSettings 
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("close source LPA client", "error", cerr)
+			client.Logger().Warn("close source LPA client", "error", cerr)
 		}
 	}()
 	if err := client.Delete(iccid); err != nil {
@@ -285,7 +292,7 @@ func sourceModemProfiles(modem *mmodem.Modem, currentSettings *settings.Settings
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("close source LPA client", "error", cerr)
+			client.Logger().Warn("close source LPA client", "error", cerr)
 		}
 	}()
 	profiles, err := client.ListProfile(nil, nil)
@@ -314,13 +321,19 @@ func deleteCCIDSourceProfile(currentSettings *settings.Settings, start Start, ic
 	if err != nil {
 		return fmt.Errorf("open CCID reader: %w", err)
 	}
-	client, err := ilpa.NewWithChannel(sourceLockKey(start.SourceType, start.SourceID), "", reader, currentSettings)
+	logger := sourceLogger(start)
+	client, err := ilpa.NewWithChannel(ilpa.ChannelConfig{
+		LockKey:  sourceLockKey(start.SourceType, start.SourceID),
+		Channel:  reader,
+		Settings: currentSettings,
+		Logger:   logger,
+	})
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("close source LPA client", "error", cerr)
+			client.Logger().Warn("close source LPA client", "error", cerr)
 		}
 	}()
 	profiles, err := client.ListProfile(nil, nil)
@@ -372,6 +385,21 @@ func listCCIDReaders() ([]string, error) {
 
 func sourceLockKey(sourceType SourceType, sourceID string) string {
 	return string(sourceType) + ":" + sourceID
+}
+
+func sourceLogger(start Start) *slog.Logger {
+	switch start.SourceType {
+	case SourceCCID:
+		logger := mmodem.LoggerForIMEI(start.SourceIMEI)
+		if reader := strings.TrimSpace(start.SourceID); reader != "" {
+			logger = logger.With("reader", reader)
+		}
+		return logger
+	case SourceModem:
+		return mmodem.LoggerForIMEI(start.SourceID)
+	default:
+		return mmodem.LoggerForIMEI("")
+	}
 }
 
 func modemName(currentSettings *settings.Settings, modem *mmodem.Modem) string {

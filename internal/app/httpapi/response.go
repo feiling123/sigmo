@@ -81,7 +81,7 @@ func logInternalError(c *echo.Context, errorCode string, err error) {
 		"uri", req.URL.RequestURI(),
 		"host", req.Host,
 		"remote_ip", c.RealIP(),
-		"modem", c.Param("id"),
+		"imei", c.Param("id"),
 	)
 }
 

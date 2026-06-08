@@ -173,7 +173,7 @@ func (m *Modem) Restart(ctx context.Context, compatible bool) error {
 
 	// Some legacy modems require the modem to be disabled and enabled to take effect.
 	if e := m.simpleStatus(ctx); e == nil {
-		slog.Info("try to disable and enable modem", "modem", m.EquipmentIdentifier)
+		slog.Info("try to disable and enable modem", "imei", m.EquipmentIdentifier)
 		err = errors.Join(err, m.togglePower(ctx))
 	} else if ctx.Err() != nil {
 		return errors.Join(err, ctx.Err())
@@ -189,7 +189,7 @@ func (m *Modem) Restart(ctx context.Context, compatible bool) error {
 			if m.inhibitDevice == nil {
 				return errors.Join(err, errors.New("modem inhibit function is required"))
 			}
-			slog.Info("try to inhibit and uninhibit modem", "modem", m.EquipmentIdentifier, "compatible", compatible)
+			slog.Info("try to inhibit and uninhibit modem", "imei", m.EquipmentIdentifier, "compatible", compatible)
 			err = errors.Join(
 				err,
 				m.inhibitDevice(ctx, m.Device, true),
@@ -213,14 +213,14 @@ func (m *Modem) togglePower(ctx context.Context) error {
 			return err
 		}
 		// Some modems disappear from DBus or cancel in-flight calls while ModemManager is replacing the object.
-		slog.Info("ignoring transient restart error", "modem", m.EquipmentIdentifier, "path", m.objectPath, "action", "disabling", "error", err)
+		slog.Info("ignoring transient restart error", "imei", m.EquipmentIdentifier, "path", m.objectPath, "action", "disabling", "error", err)
 	}
 	if err := m.Enable(ctx); err != nil {
 		if !isTransientRestartError(err) {
 			return err
 		}
 		// Some modems disappear from DBus or cancel in-flight calls while ModemManager is replacing the object.
-		slog.Info("ignoring transient restart error", "modem", m.EquipmentIdentifier, "path", m.objectPath, "action", "enabling", "error", err)
+		slog.Info("ignoring transient restart error", "imei", m.EquipmentIdentifier, "path", m.objectPath, "action", "enabling", "error", err)
 	}
 	return nil
 }

@@ -67,7 +67,7 @@ func (s *Service) OpenWebRTCSession(ctx context.Context, modem *mmodem.Modem, ca
 		if err != nil {
 			slog.Warn("open AMR codec",
 				"call_id", callID,
-				"modem", modem.EquipmentIdentifier,
+				"imei", modem.EquipmentIdentifier,
 				"error", err,
 			)
 			return nil, ErrMediaUnavailable

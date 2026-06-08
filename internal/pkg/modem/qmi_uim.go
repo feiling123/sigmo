@@ -60,7 +60,7 @@ func qmiActivateProvisioningIfSimMissing(ctx context.Context, m *Modem) error {
 
 	slog.Info(
 		"sim missing, activate provisioning session",
-		"modem", m.EquipmentIdentifier,
+		"imei", m.EquipmentIdentifier,
 		"slot", slot,
 		"applicationState", app.State,
 		"personalizationState", app.PersonalizationState,
@@ -91,11 +91,11 @@ func qmiRepowerSimCard(ctx context.Context, m *Modem) error {
 	if err := reader.PowerOffSIM(ctx, slot); err != nil {
 		return fmt.Errorf("power off sim: %w", err)
 	}
-	slog.Info("sim powered off", "modem", m.EquipmentIdentifier, "slot", slot)
+	slog.Info("sim powered off", "imei", m.EquipmentIdentifier, "slot", slot)
 	if err := reader.PowerOnSIM(ctx, uim.PowerOnSIMRequest{Slot: slot}); err != nil {
 		return fmt.Errorf("power on sim: %w", err)
 	}
-	slog.Info("sim powered on", "modem", m.EquipmentIdentifier, "slot", slot)
+	slog.Info("sim powered on", "imei", m.EquipmentIdentifier, "slot", slot)
 	return nil
 }
 
