@@ -11,6 +11,7 @@ PRO_SUMFILE="${PRO_SUMFILE:-${PRO_MODFILE%.mod}.sum}"
 OUTPUT_DIR="${SIGMO_BUILD_DIR:-${ROOT_DIR}/build/pro}"
 MANIFEST="${SIGMO_PRO_MANIFEST:-${OUTPUT_DIR}/artifacts.tsv}"
 GOPRIVATE_PATTERN="${GOPRIVATE:-${PRO_GOPRIVATE}}"
+PRO_TARGETS="${SIGMO_PRO_TARGETS:-linux-amd64 linux-arm64 linux-arm64-musl}"
 MUSL_ARM64_LIBC="libc.musl-aarch64.so.1"
 MUSL_ARM64_INTERPRETER="/lib/ld-musl-aarch64.so.1"
 
@@ -261,19 +262,43 @@ build_target() {
 	printf '%s\t%s\t%s\n' "${chat_id}" "${name}" "${archive}" >> "${MANIFEST}"
 }
 
+build_named_target() {
+	local chat_id="$1"
+	local base_version="$2"
+	local recipient_dir="$3"
+	local name="$4"
+
+	case "${name}" in
+		linux-amd64)
+			build_target "${chat_id}" "${base_version}" "${recipient_dir}" "${name}" "amd64"
+			;;
+		linux-arm64)
+			build_target "${chat_id}" "${base_version}" "${recipient_dir}" "${name}" "arm64"
+			;;
+		linux-arm64-musl)
+			build_target "${chat_id}" "${base_version}" "${recipient_dir}" "${name}" "arm64" "1"
+			;;
+		*)
+			echo "unknown Pro target: ${name}" >&2
+			return 1
+			;;
+	esac
+}
+
 build_recipient() {
 	local chat_id="$1"
 	local base_version="$2"
 	local safe_chat_id
 	local recipient_dir
+	local target
 
 	safe_chat_id="${chat_id//-/_}"
 	recipient_dir="${OUTPUT_DIR}/TGID-${safe_chat_id}"
 	mkdir -p "${recipient_dir}"
 
-	build_target "${chat_id}" "${base_version}" "${recipient_dir}" "linux-amd64" "amd64"
-	build_target "${chat_id}" "${base_version}" "${recipient_dir}" "linux-arm64" "arm64"
-	build_target "${chat_id}" "${base_version}" "${recipient_dir}" "linux-arm64-musl" "arm64" "1"
+	for target in ${PRO_TARGETS}; do
+		build_named_target "${chat_id}" "${base_version}" "${recipient_dir}" "${target}"
+	done
 }
 
 main() {
@@ -294,6 +319,7 @@ main() {
 
 	cd "${ROOT_DIR}"
 	mkdir -p "${OUTPUT_DIR}"
+	mkdir -p "$(dirname "${MANIFEST}")"
 	export GOCACHE="${GOCACHE:-${OUTPUT_DIR}/.go-build-cache}"
 	mkdir -p "${GOCACHE}"
 	configure_pro_auth

@@ -19,8 +19,8 @@ permissions:
   contents: read
 
 jobs:
-  build-pro:
-    name: Build and send Pro artifacts
+  frontend:
+    name: Build frontend
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -31,18 +31,135 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Build frontend
+        run: |
+          cd web
+          bun install --frozen-lockfile
+          bun run build --mode prod
+
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-dist
+          path: web/dist/**
+          if-no-files-found: error
+          retention-days: 1
+
+  build-pro:
+    name: Build Pro ${{ matrix.target.name }}
+    runs-on: ubuntu-latest
+    needs: frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: linux-amd64 }
+          - { name: linux-arm64 }
+          - { name: linux-arm64-musl }
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: web/dist
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: "stable"
+          cache-dependency-path: |
+            go.sum
+            pro/go.sum
 
-      - name: Build and send Pro artifacts
+      - name: Build Pro ${{ matrix.target.name }}
         env:
           SIGMO_PRO_MODULE_TOKEN: ${{ secrets.SIGMO_PRO_MODULE_TOKEN }}
-          SIGMO_PRO_TELEGRAM_BOT_TOKEN: ${{ secrets.SIGMO_PRO_TELEGRAM_BOT_TOKEN }}
           SIGMO_PRO_TELEGRAM_CHAT_IDS: ${{ vars.SIGMO_PRO_TELEGRAM_CHAT_IDS }}
+          SIGMO_BUILD_DIR: build/pro
+          SIGMO_PRO_MANIFEST: build/pro/manifests/${{ matrix.target.name }}.tsv
+          SIGMO_PRO_TARGETS: ${{ matrix.target.name }}
+          SIGMO_SKIP_FRONTEND_BUILD: "1"
         run: |
           set -euo pipefail
 
           scripts/build-pro.sh
+
+      - name: Upload Pro ${{ matrix.target.name }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: sigmo-pro-${{ matrix.target.name }}
+          path: |
+            build/pro/TGID-*/sigmo-pro-${{ matrix.target.name }}.tar.gz
+            build/pro/manifests/${{ matrix.target.name }}.tsv
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  send-pro:
+    name: Send Pro artifacts
+    runs-on: ubuntu-latest
+    needs: build-pro
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download Pro artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: sigmo-pro-*
+          path: build/pro
+          merge-multiple: true
+
+      - name: Merge artifact manifests
+        run: |
+          set -euo pipefail
+
+          mapfile -t manifests < <(find build/pro/manifests -type f -name '*.tsv' | sort)
+          if [ "${#manifests[@]}" -eq 0 ]; then
+            echo "no Pro artifact manifests found" >&2
+            exit 1
+          fi
+
+          manifest="build/pro/artifacts.tsv"
+          tmp="${manifest}.tmp"
+          printf 'chat_id\ttarget\tarchive\n' > "${tmp}"
+          for file in "${manifests[@]}"; do
+            awk 'NR > 1 && NF > 0 { print }' "${file}"
+          done | sort -t $'\t' -k1,1 -k2,2 >> "${tmp}"
+          mv "${tmp}" "${manifest}"
+
+      - name: Send Pro artifacts
+        env:
+          SIGMO_PRO_TELEGRAM_BOT_TOKEN: ${{ secrets.SIGMO_PRO_TELEGRAM_BOT_TOKEN }}
+          SIGMO_BUILD_DIR: build/pro
+        run: |
+          set -euo pipefail
+
           scripts/send-pro-artifacts.sh
+
+  cleanup-pro-artifacts:
+    name: Delete Pro artifacts
+    runs-on: ubuntu-latest
+    needs:
+      - frontend
+      - build-pro
+      - send-pro
+    if: ${{ always() }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Delete transient artifacts
+        uses: geekyeggo/delete-artifact@v6
+        with:
+          name: |
+            web-dist
+            sigmo-pro-*
