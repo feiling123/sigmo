@@ -12,12 +12,31 @@ OUTPUT_DIR="${SIGMO_BUILD_DIR:-${ROOT_DIR}/build/pro}"
 MANIFEST="${SIGMO_PRO_MANIFEST:-${OUTPUT_DIR}/artifacts.tsv}"
 GOPRIVATE_PATTERN="${GOPRIVATE:-${PRO_GOPRIVATE}}"
 PRO_TARGETS="${SIGMO_PRO_TARGETS:-linux-amd64 linux-arm64 linux-arm64-musl}"
+TGID_PLACEHOLDER="TGID-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 MUSL_ARM64_LIBC="libc.musl-aarch64.so.1"
 MUSL_ARM64_INTERPRETER="/lib/ld-musl-aarch64.so.1"
+
+case "${OUTPUT_DIR}" in
+	/*)
+		OUTPUT_DIR_ABS="${OUTPUT_DIR}"
+		;;
+	*)
+		OUTPUT_DIR_ABS="${ROOT_DIR}/${OUTPUT_DIR}"
+		;;
+esac
+case "${MANIFEST}" in
+	/*)
+		MANIFEST_ABS="${MANIFEST}"
+		;;
+	*)
+		MANIFEST_ABS="${ROOT_DIR}/${MANIFEST}"
+		;;
+esac
 
 cleanup_files=()
 cleanup_dirs=()
 musl_modfile=""
+built_base_binary=""
 
 cleanup() {
 	if [ "${#cleanup_files[@]}" -gt 0 ]; then
@@ -196,7 +215,7 @@ prepare_arm64_musl_modfile() {
 
 	source_modfile="$(root_path "${PRO_MODFILE}")"
 	source_sumfile="$(root_path "${PRO_SUMFILE}")"
-	musl_modfile="$(root_path "${OUTPUT_DIR}/go.linux-arm64-musl.mod")"
+	musl_modfile="${OUTPUT_DIR_ABS}/go.linux-arm64-musl.mod"
 
 	(cd "${PRO_DIR}" && go mod download)
 
@@ -225,25 +244,116 @@ package_target() {
 	)
 }
 
-build_target() {
+count_pattern() {
+	local file="$1"
+	local pattern="$2"
+
+	NEEDLE="${pattern}" perl -0777 -ne '
+		BEGIN {
+			$needle = $ENV{"NEEDLE"};
+			$count = 0;
+		}
+		my $pos = -1;
+		while (($pos = index($_, $needle, $pos + 1)) >= 0) {
+			$count++;
+		}
+		END {
+			print $count, "\n";
+		}
+	' "${file}"
+}
+
+tgid_watermark() {
 	local chat_id="$1"
+	local digits
+	local padded
+	local sign="P"
+
+	digits="${chat_id}"
+	if [[ "${digits}" == -* ]]; then
+		sign="N"
+		digits="${digits#-}"
+	fi
+	if [ "${#digits}" -gt 31 ]; then
+		echo "Telegram chat id is too long to watermark: ${chat_id}" >&2
+		return 1
+	fi
+
+	printf -v padded '%031s' "${digits}"
+	padded="${padded// /0}"
+	printf 'TGID-%s%s\n' "${sign}" "${padded}"
+}
+
+patch_tgid() {
+	local source="$1"
+	local target="$2"
+	local chat_id="$3"
+	local before_count
+	local placeholder_count
+	local replacement
+	local replacement_count
+
+	replacement="$(tgid_watermark "${chat_id}")"
+	if [ "${#replacement}" -ne "${#TGID_PLACEHOLDER}" ]; then
+		echo "watermark length mismatch: ${replacement}" >&2
+		return 1
+	fi
+
+	before_count="$(count_pattern "${source}" "${TGID_PLACEHOLDER}")"
+	if [ "${before_count}" -ne 1 ]; then
+		echo "expected one TGID placeholder in ${source}; found ${before_count}" >&2
+		return 1
+	fi
+
+	cp "${source}" "${target}"
+	NEEDLE="${TGID_PLACEHOLDER}" REPLACEMENT="${replacement}" perl -0777 -pi -e '
+		BEGIN {
+			$needle = $ENV{"NEEDLE"};
+			$replacement = $ENV{"REPLACEMENT"};
+			die "replacement length mismatch\n" unless length($needle) == length($replacement);
+			$count = 0;
+		}
+		$count += s/\Q$needle\E/$replacement/g;
+		END {
+			die "patched $count TGID placeholders\n" unless $count == 1;
+		}
+	' "${target}"
+
+	placeholder_count="$(count_pattern "${target}" "${TGID_PLACEHOLDER}")"
+	if [ "${placeholder_count}" -ne 0 ]; then
+		echo "TGID placeholder still present in ${target}" >&2
+		return 1
+	fi
+
+	replacement_count="$(count_pattern "${target}" "${replacement}")"
+	if [ "${replacement_count}" -ne 1 ]; then
+		echo "expected one TGID watermark in ${target}; found ${replacement_count}" >&2
+		return 1
+	fi
+}
+
+recipient_dir_for_chat() {
+	local chat_id="$1"
+	local safe_chat_id
+
+	safe_chat_id="${chat_id//-/_}"
+	printf '%s/TGID-%s\n' "${OUTPUT_DIR}" "${safe_chat_id}"
+}
+
+build_target_base() {
+	local name="$1"
 	local base_version="$2"
-	local recipient_dir="$3"
-	local name="$4"
-	local goarch="$5"
-	local musl="${6:-0}"
+	local goarch="$3"
+	local musl="${4:-0}"
 	local binary
-	local archive
-	local build_archive
 	local build_binary
 	local ldflags
 	local go_args=()
 
-	binary="${recipient_dir}/sigmo-pro-${name}"
-	archive="${recipient_dir}/sigmo-pro-${name}.tar.gz"
+	binary="${OUTPUT_DIR}/targets/sigmo-pro-${name}"
 	build_binary="$(root_path "${binary}")"
-	build_archive="$(root_path "${archive}")"
-	ldflags="-w -s -X main.BuildVersion=${base_version}-TGID-${chat_id}"
+	mkdir -p "$(dirname "${build_binary}")"
+	ldflags="-w -s -X main.BuildVersion=${base_version}-${TGID_PLACEHOLDER}"
 
 	if [ "${musl}" = "1" ]; then
 		prepare_arm64_musl_modfile
@@ -252,7 +362,7 @@ build_target() {
 		go_args+=(-modfile="${musl_modfile}")
 	fi
 
-	echo "Building ${binary}"
+	echo "Building base ${binary}"
 	go_args+=(
 		-tags="${PRO_GO_TAGS}"
 		-trimpath
@@ -262,25 +372,22 @@ build_target() {
 	)
 
 	(cd "${PRO_DIR}" && env GOOS=linux GOARCH="${goarch}" CGO_ENABLED=0 go build "${go_args[@]}")
-	package_target "${build_binary}" "${build_archive}"
-	printf '%s\t%s\t%s\n' "${chat_id}" "${name}" "${archive}" >> "${MANIFEST}"
+	built_base_binary="${build_binary}"
 }
 
-build_named_target() {
-	local chat_id="$1"
+build_named_target_base() {
+	local name="$1"
 	local base_version="$2"
-	local recipient_dir="$3"
-	local name="$4"
 
 	case "${name}" in
 		linux-amd64)
-			build_target "${chat_id}" "${base_version}" "${recipient_dir}" "${name}" "amd64"
+			build_target_base "${name}" "${base_version}" "amd64"
 			;;
 		linux-arm64)
-			build_target "${chat_id}" "${base_version}" "${recipient_dir}" "${name}" "arm64"
+			build_target_base "${name}" "${base_version}" "arm64"
 			;;
 		linux-arm64-musl)
-			build_target "${chat_id}" "${base_version}" "${recipient_dir}" "${name}" "arm64" "1"
+			build_target_base "${name}" "${base_version}" "arm64" "1"
 			;;
 		*)
 			echo "unknown Pro target: ${name}" >&2
@@ -289,25 +396,33 @@ build_named_target() {
 	esac
 }
 
-build_recipient() {
+package_recipient_target() {
 	local chat_id="$1"
-	local base_version="$2"
-	local safe_chat_id
+	local base_binary="$2"
+	local name="$3"
+	local archive
+	local binary
+	local build_archive
+	local build_binary
 	local recipient_dir
-	local target
 
-	safe_chat_id="${chat_id//-/_}"
-	recipient_dir="${OUTPUT_DIR}/TGID-${safe_chat_id}"
-	mkdir -p "${recipient_dir}"
+	recipient_dir="$(recipient_dir_for_chat "${chat_id}")"
+	binary="${recipient_dir}/sigmo-pro-${name}"
+	archive="${recipient_dir}/sigmo-pro-${name}.tar.gz"
+	build_binary="$(root_path "${binary}")"
+	build_archive="$(root_path "${archive}")"
+	mkdir -p "$(dirname "${build_binary}")"
 
-	for target in ${PRO_TARGETS}; do
-		build_named_target "${chat_id}" "${base_version}" "${recipient_dir}" "${target}"
-	done
+	echo "Patching ${binary} for TGID ${chat_id}"
+	patch_tgid "${base_binary}" "${build_binary}" "${chat_id}"
+	package_target "${build_binary}" "${build_archive}"
+	printf '%s\t%s\t%s\n' "${chat_id}" "${name}" "${archive}" >> "${MANIFEST_ABS}"
 }
 
 main() {
 	local recipients=()
 	local chat_id
+	local target
 	local version
 
 	if [ ! -f "$(root_path "${PRO_MODFILE}")" ]; then
@@ -322,17 +437,24 @@ main() {
 	fi
 
 	cd "${ROOT_DIR}"
-	mkdir -p "${OUTPUT_DIR}"
-	mkdir -p "$(dirname "${MANIFEST}")"
-	export GOCACHE="${GOCACHE:-${OUTPUT_DIR}/.go-build-cache}"
+	mkdir -p "${OUTPUT_DIR_ABS}"
+	mkdir -p "$(dirname "${MANIFEST_ABS}")"
+	if [ -n "${GOCACHE:-}" ]; then
+		export GOCACHE="$(root_path "${GOCACHE}")"
+	else
+		export GOCACHE="${OUTPUT_DIR_ABS}/.go-build-cache"
+	fi
 	mkdir -p "${GOCACHE}"
 	configure_pro_auth
 	version="$(build_version)"
 
 	build_frontend
-	printf 'chat_id\ttarget\tarchive\n' > "${MANIFEST}"
-	for chat_id in "${recipients[@]}"; do
-		build_recipient "${chat_id}" "${version}"
+	printf 'chat_id\ttarget\tarchive\n' > "${MANIFEST_ABS}"
+	for target in ${PRO_TARGETS}; do
+		build_named_target_base "${target}" "${version}"
+		for chat_id in "${recipients[@]}"; do
+			package_recipient_target "${chat_id}" "${built_base_binary}" "${target}"
+		done
 	done
 
 	echo "Wrote artifact manifest: ${MANIFEST}"
