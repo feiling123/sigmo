@@ -1,5 +1,7 @@
 package modem
 
+import "github.com/damonto/sigmo/internal/app/modemstatus"
+
 type SlotResponse struct {
 	Active             bool   `json:"active"`
 	OperatorName       string `json:"operatorName"`
@@ -34,6 +36,8 @@ type ModemSettingsResponse struct {
 }
 
 type ModemResponse struct {
+	modemstatus.Fields
+
 	Manufacturer       string                     `json:"manufacturer"`
 	ID                 string                     `json:"id"`
 	FirmwareRevision   string                     `json:"firmwareRevision"`

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/damonto/sigmo/internal/app/forwarder"
+	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/app/router"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/message"
@@ -25,11 +26,12 @@ type Runtime struct {
 	NetworkPreferences *modem.NetworkPreferences
 	Storage            *storage.Store
 
-	messageRoute message.Route
-	ussdRoute    ussd.Route
-	routes       []router.Extension
-	runners      []Runner
-	features     []string
+	messageRoute  message.Route
+	ussdRoute     ussd.Route
+	modemOverview []modemstatus.Extension
+	routes        []router.Extension
+	runners       []Runner
+	features      []string
 }
 
 func (r *Runtime) SetMessageRoute(route message.Route) {
@@ -38,6 +40,10 @@ func (r *Runtime) SetMessageRoute(route message.Route) {
 
 func (r *Runtime) SetUSSDRoute(route ussd.Route) {
 	r.ussdRoute = route
+}
+
+func (r *Runtime) AddModemOverview(extensions ...modemstatus.Extension) {
+	r.modemOverview = append(r.modemOverview, extensions...)
 }
 
 func (r *Runtime) AddRoute(route router.Extension) {

@@ -141,6 +141,7 @@ func Run(cfg Config) error {
 		Storage:            db,
 		MessageRoute:       runtime.messageRoute,
 		USSDRoute:          runtime.ussdRoute,
+		ModemOverview:      runtime.modemOverview,
 		Features:           runtime.features,
 		Extensions:         runtime.routes,
 	}); err != nil {

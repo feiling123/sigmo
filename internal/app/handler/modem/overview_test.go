@@ -2,8 +2,12 @@ package modem
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/damonto/sigmo/internal/app/modemstatus"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
@@ -51,6 +55,107 @@ func TestCatalogBuildResponseLockedModem(t *testing.T) {
 			}
 			if got.UnlockSupported != tt.wantSupported {
 				t.Fatalf("unlockSupported = %v, want %v", got.UnlockSupported, tt.wantSupported)
+			}
+		})
+	}
+}
+
+func TestCatalogApplyOverviewExtensions(t *testing.T) {
+	errStatus := errors.New("status source")
+	tests := []struct {
+		name              string
+		extensions        []modemstatus.Extension
+		wantWiFiEnabled   bool
+		wantWiFiPreferred bool
+		wantWiFiConnected bool
+		wantErr           error
+	}{
+		{
+			name: "fills wifi calling fields",
+			extensions: []modemstatus.Extension{
+				func(ctx context.Context, modem *mmodem.Modem, fields *modemstatus.Fields) error {
+					fields.WiFiCallingEnabled = true
+					fields.WiFiCallingPreferred = true
+					fields.WiFiCallingConnected = true
+					return nil
+				},
+			},
+			wantWiFiEnabled:   true,
+			wantWiFiPreferred: true,
+			wantWiFiConnected: true,
+		},
+		{
+			name: "skips nil extension",
+			extensions: []modemstatus.Extension{
+				nil,
+			},
+		},
+		{
+			name: "wraps extension error",
+			extensions: []modemstatus.Extension{
+				func(ctx context.Context, modem *mmodem.Modem, fields *modemstatus.Fields) error {
+					return errStatus
+				},
+			},
+			wantErr: errStatus,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			catalog := newCatalog(settings.NewMemoryStore(settings.Default()), nil, tt.extensions...)
+			resp := &ModemResponse{}
+
+			err := catalog.applyOverviewExtensions(context.Background(), &mmodem.Modem{}, resp)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("applyOverviewExtensions() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("applyOverviewExtensions() error = %v", err)
+			}
+			if resp.WiFiCallingEnabled != tt.wantWiFiEnabled {
+				t.Fatalf("WiFiCallingEnabled = %v, want %v", resp.WiFiCallingEnabled, tt.wantWiFiEnabled)
+			}
+			if resp.WiFiCallingPreferred != tt.wantWiFiPreferred {
+				t.Fatalf("WiFiCallingPreferred = %v, want %v", resp.WiFiCallingPreferred, tt.wantWiFiPreferred)
+			}
+			if resp.WiFiCallingConnected != tt.wantWiFiConnected {
+				t.Fatalf("WiFiCallingConnected = %v, want %v", resp.WiFiCallingConnected, tt.wantWiFiConnected)
+			}
+		})
+	}
+}
+
+func TestModemResponseJSONIncludesOverviewFields(t *testing.T) {
+	tests := []struct {
+		name string
+		resp ModemResponse
+		want string
+	}{
+		{
+			name: "wifi calling connected",
+			resp: ModemResponse{
+				Fields: modemstatus.Fields{
+					WiFiCallingEnabled:   true,
+					WiFiCallingPreferred: true,
+					WiFiCallingConnected: true,
+				},
+			},
+			want: `"wifiCallingConnected":true`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := json.Marshal(tt.resp)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+			if !strings.Contains(string(got), tt.want) {
+				t.Fatalf("Marshal() = %s, want field %s", got, tt.want)
 			}
 		})
 	}

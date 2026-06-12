@@ -21,6 +21,7 @@ import (
 	hsettings "github.com/damonto/sigmo/internal/app/handler/settings"
 	"github.com/damonto/sigmo/internal/app/handler/ussd"
 	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
+	"github.com/damonto/sigmo/internal/app/modemstatus"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	pmessage "github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
@@ -41,6 +42,7 @@ type RegisterConfig struct {
 	Storage            *storage.Store
 	MessageRoute       pmessage.Route
 	USSDRoute          pussd.Route
+	ModemOverview      []modemstatus.Extension
 	Features           []string
 	Extensions         []Extension
 }
@@ -75,7 +77,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.PUT("/settings", h.Update)
 		}
 
-		h := hmodem.New(deps.Store, deps.Registry, deps.Internet)
+		h := hmodem.New(deps.Store, deps.Registry, deps.Internet, deps.ModemOverview...)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.POST("/modems/:id/sim-unlocks", h.UnlockSIM)

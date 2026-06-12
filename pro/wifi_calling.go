@@ -5,10 +5,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/app/router"
 	pmessage "github.com/damonto/sigmo/internal/pkg/message"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -35,6 +37,7 @@ var proWiFiCalling = func(app *proApp) error {
 	runtime.AddFeatures(wificalling.FeatureName)
 	runtime.SetMessageRoute(messageRoute{wifiCalling: wifiCalling})
 	runtime.SetUSSDRoute(ussdRoute{wifiCalling: wifiCalling})
+	runtime.AddModemOverview(wifiCallingOverview(wifiCalling.Status))
 	runtime.AddRunner(func(ctx context.Context) error {
 		return wifiCalling.Run(ctx, runtime.Registry)
 	})
@@ -49,6 +52,24 @@ var proWiFiCalling = func(app *proApp) error {
 		return nil
 	})
 	return nil
+}
+
+type wifiCallingStatusFunc func(context.Context, *mmodem.Modem) (wificalling.Status, error)
+
+func wifiCallingOverview(readStatus wifiCallingStatusFunc) modemstatus.Extension {
+	return func(ctx context.Context, modem *mmodem.Modem, fields *modemstatus.Fields) error {
+		status, err := readStatus(ctx, modem)
+		if errors.Is(err, wificalling.ErrUnavailable) || errors.Is(err, mmodem.ErrProfileIDMissing) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("fetch Wi-Fi Calling status: %w", err)
+		}
+		fields.WiFiCallingEnabled = status.Enabled
+		fields.WiFiCallingPreferred = status.Preferred
+		fields.WiFiCallingConnected = status.Connected
+		return nil
+	}
 }
 
 type messageRoute struct {

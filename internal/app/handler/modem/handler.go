@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
+	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
@@ -56,10 +57,10 @@ var (
 	errUpdateMSISDNTimeout  = errors.New("updating MSISDN timed out, please refresh to confirm the active slot")
 )
 
-func New(store *settings.Store, registry *mmodem.Registry, internetConnector *internet.Connector) *Handler {
+func New(store *settings.Store, registry *mmodem.Registry, internetConnector *internet.Connector, overviewExtensions ...modemstatus.Extension) *Handler {
 	return &Handler{
 		registry: registry,
-		catalog:  newCatalog(store, registry),
+		catalog:  newCatalog(store, registry, overviewExtensions...),
 		simSlot:  newSIMSlot(registry),
 		msisdn:   newMSISDN(store, registry),
 		settings: newSettings(store),

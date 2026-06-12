@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/pkg/carrier"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -15,14 +16,16 @@ import (
 )
 
 type catalog struct {
-	store    *settings.Store
-	registry *mmodem.Registry
+	store              *settings.Store
+	registry           *mmodem.Registry
+	overviewExtensions []modemstatus.Extension
 }
 
-func newCatalog(store *settings.Store, registry *mmodem.Registry) *catalog {
+func newCatalog(store *settings.Store, registry *mmodem.Registry, overviewExtensions ...modemstatus.Extension) *catalog {
 	return &catalog{
-		store:    store,
-		registry: registry,
+		store:              store,
+		registry:           registry,
+		overviewExtensions: slices.Clone(overviewExtensions),
 	}
 }
 
@@ -109,7 +112,7 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 	if sim.OperatorName != "" {
 		simOperatorName = sim.OperatorName
 	}
-	return &ModemResponse{
+	resp := &ModemResponse{
 		Manufacturer:     device.Manufacturer,
 		ID:               device.EquipmentIdentifier,
 		FirmwareRevision: device.FirmwareRevision,
@@ -135,7 +138,11 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		},
 		SignalQuality: percent,
 		SupportsEsim:  supportsEsim,
-	}, nil
+	}
+	if err := c.applyOverviewExtensions(ctx, device, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (c *catalog) buildLockedResponse(device *mmodem.Modem) (*ModemResponse, error) {
@@ -224,6 +231,18 @@ func (c *catalog) buildSlotsResponse(ctx context.Context, device *mmodem.Modem) 
 		})
 	}
 	return simSlots, nil
+}
+
+func (c *catalog) applyOverviewExtensions(ctx context.Context, device *mmodem.Modem, resp *ModemResponse) error {
+	for _, extension := range c.overviewExtensions {
+		if extension == nil {
+			continue
+		}
+		if err := extension(ctx, device, &resp.Fields); err != nil {
+			return fmt.Errorf("apply modem overview extension: %w", err)
+		}
+	}
+	return nil
 }
 
 func supportsEsim(m *mmodem.Modem, store *settings.Store) (bool, error) {
