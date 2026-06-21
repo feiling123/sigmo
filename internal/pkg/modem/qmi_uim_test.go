@@ -119,7 +119,8 @@ func TestQMIRepowerSimCard(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			withQMIUIMReader(t, tt.modem.PrimaryPort, qmiTestSlot(tt.modem), tt.reader, tt.openErr)
+			slot := qmiTestSlot(tt.modem)
+			withQMIUIMReader(t, tt.modem.PrimaryPort, slot, tt.reader, tt.openErr)
 
 			ctx := context.Background()
 			if tt.cancelCtx {
@@ -128,7 +129,7 @@ func TestQMIRepowerSimCard(t *testing.T) {
 				tt.reader.afterPowerOff = cancel
 			}
 
-			err := qmiRepowerSimCard(ctx, tt.modem)
+			err := qmiRepowerSimCard(ctx, tt.modem, slot)
 			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Fatalf("qmiRepowerSimCard() error = %v, want %v", err, tt.wantErr)
 			}
@@ -219,9 +220,10 @@ func TestQMIActivateProvisioningIfSimMissing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			withQMIUIMReader(t, tt.modem.PrimaryPort, qmiTestSlot(tt.modem), tt.reader, nil)
+			slot := qmiTestSlot(tt.modem)
+			withQMIUIMReader(t, tt.modem.PrimaryPort, slot, tt.reader, nil)
 
-			err := qmiActivateProvisioningIfSimMissing(context.Background(), tt.modem)
+			err := qmiActivateProvisioningIfSimMissing(context.Background(), tt.modem, slot)
 			if tt.wantErr != nil && err == nil {
 				t.Fatalf("qmiActivateProvisioningIfSimMissing() error = nil, want %v", tt.wantErr)
 			}

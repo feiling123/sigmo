@@ -28,10 +28,13 @@ type SIMTarget struct {
 }
 
 type qmiTargetSIMState struct {
-	supported bool
-	matches   bool
-	ready     bool
-	iccid     string
+	supported     bool
+	matches       bool
+	recoverable   bool
+	ready         bool
+	iccidMismatch bool
+	iccid         string
+	slot          uint8
 }
 
 func (t SIMTarget) valid() bool {
@@ -94,7 +97,8 @@ func (m *Registry) EnsureSIMVisible(ctx context.Context, current *Modem, target 
 		if qmiErr != nil {
 			slog.Warn("read QMI SIM state", "imei", current.EquipmentIdentifier, "error", qmiErr)
 		}
-		if qmiErr != nil || !state.supported || !state.matches || state.ready {
+		needsRepower := qmiErr == nil && state.supported && state.recoverable && (!state.ready || !state.matches)
+		if !needsRepower {
 			notReadyRetryCount = 0
 		}
 
@@ -113,31 +117,45 @@ func (m *Registry) EnsureSIMVisible(ctx context.Context, current *Modem, target 
 			continue
 		case qmiErr != nil:
 			// QMI returned a partial or unreliable state; do not use it for recovery actions.
-		case state.supported && state.matches && state.ready && !refreshedModemManager:
+		case state.supported && state.recoverable && state.ready && state.matches && !refreshedModemManager:
 			notReadyRetryCount = 0
 			refreshedModemManager = true
 			if err := current.refreshModemManager(ctx); err != nil {
 				return nil, fmt.Errorf("refresh ModemManager SIM state: %w", err)
 			}
 			continue
-		case state.supported && state.matches && state.ready && !reloadedModemManager:
+		case state.supported && state.recoverable && state.ready && state.matches && !reloadedModemManager:
 			notReadyRetryCount = 0
 			reloadedModemManager = true
 			if err := current.reloadModemManager(ctx); err != nil {
 				return nil, fmt.Errorf("reload ModemManager SIM state: %w", err)
 			}
 			continue
-		case state.supported && state.matches && !state.ready && !activatedProvisioning:
+		case state.supported && state.recoverable && state.ready && !state.matches && !refreshedModemManager:
+			notReadyRetryCount = 0
+			refreshedModemManager = true
+			if err := current.refreshModemManager(ctx); err != nil {
+				return nil, fmt.Errorf("refresh ModemManager SIM state: %w", err)
+			}
+			continue
+		case state.supported && state.recoverable && state.ready && !state.matches && !reloadedModemManager:
+			notReadyRetryCount = 0
+			reloadedModemManager = true
+			if err := current.reloadModemManager(ctx); err != nil {
+				return nil, fmt.Errorf("reload ModemManager SIM state: %w", err)
+			}
+			continue
+		case needsRepower && !state.ready && !state.iccidMismatch && !activatedProvisioning:
 			activatedProvisioning = true
 			notReadyRetryCount = 0
-			if err := qmiActivateProvisioningIfSimMissing(ctx, current); err != nil {
+			if err := qmiActivateProvisioningIfSimMissing(ctx, current, state.slot); err != nil {
 				slog.Warn("activate QMI provisioning session", "imei", current.EquipmentIdentifier, "error", err)
 			}
 			if err := sleepContext(ctx, simNotReadyRetryInterval); err != nil {
 				return nil, err
 			}
 			continue
-		case state.supported && state.matches && !state.ready && !repoweredSIM:
+		case needsRepower && !repoweredSIM:
 			notReadyRetryCount++
 			if notReadyRetryCount < simNotReadyRetryCount {
 				if err := sleepContext(ctx, simNotReadyRetryInterval); err != nil {
@@ -146,9 +164,15 @@ func (m *Registry) EnsureSIMVisible(ctx context.Context, current *Modem, target 
 				continue
 			}
 			repoweredSIM = true
-			if err := qmiRepowerSimCard(ctx, current); err != nil {
+			if err := qmiRepowerSimCard(ctx, current, state.slot); err != nil {
 				return nil, fmt.Errorf("repower QMI SIM: %w", err)
 			}
+			provisioningCtx, cancel := context.WithTimeout(context.Background(), simPostRepowerTimeout())
+			if err := qmiActivateProvisioningAfterRepower(provisioningCtx, current, target); err != nil {
+				slog.Warn("activate QMI provisioning session after SIM repower", "imei", current.EquipmentIdentifier, "error", err)
+			}
+			cancel()
+
 			postRepowerCtx, cancel := context.WithTimeout(context.Background(), simPostRepowerTimeout())
 			modem, visible, err := m.waitForSIMVisibleInModemManager(postRepowerCtx, current, target)
 			cancel()
@@ -180,6 +204,17 @@ func (m *Registry) EnsureSIMVisible(ctx context.Context, current *Modem, target 
 		case <-ticker.C:
 		}
 	}
+}
+
+func qmiActivateProvisioningAfterRepower(ctx context.Context, m *Modem, target SIMTarget) error {
+	state, err := qmiSIMStateForTarget(ctx, m, target)
+	if err != nil {
+		return err
+	}
+	if !state.supported || !state.recoverable || state.ready || state.iccidMismatch {
+		return nil
+	}
+	return qmiActivateProvisioningIfSimMissing(ctx, m, state.slot)
 }
 
 func simPostRepowerTimeout() time.Duration {
@@ -259,18 +294,23 @@ func qmiSIMStateForTarget(ctx context.Context, m *Modem, target SIMTarget) (qmiT
 	}
 	defer closeQMIUIMReader(reader)
 
-	state := qmiTargetSIMState{supported: true}
-	slotStatus, err := reader.SlotStatus(ctx)
+	state := qmiTargetSIMState{supported: true, slot: slot}
+	var slotStatus uim.SlotStatus
+	var slotStatusRead bool
+	slotStatus, err = reader.SlotStatus(ctx)
 	if err != nil && !errors.Is(err, qcom.QMIErrorNotSupported) {
 		return state, fmt.Errorf("read QMI UIM slot status: %w", err)
 	}
 	if err == nil {
+		slotStatusRead = true
 		iccid, err := qmiICCIDForSlot(slotStatus, slot)
 		if err != nil {
 			return state, err
 		}
 		state.iccid = iccid
 		state.matches = qmiSlotMatchesTarget(slotStatus, slot, state.iccid, target)
+		targetICCID := strings.TrimSpace(target.ICCID)
+		state.iccidMismatch = targetICCID != "" && state.iccid != "" && state.iccid != targetICCID
 	}
 
 	cardStatus, err := reader.CardStatus(ctx)
@@ -278,6 +318,11 @@ func qmiSIMStateForTarget(ctx context.Context, m *Modem, target SIMTarget) (qmiT
 		return state, fmt.Errorf("read QMI UIM card status: %w", err)
 	}
 	state.ready = qmiUSIMReadyForSlot(cardStatus, slot)
+	state.recoverable = state.matches
+	if !state.recoverable && qmiUSIMPresentForSlot(cardStatus, slot) {
+		slotContradicted := target.Slot == 0 && slotStatusRead && slotStatus.ActiveSlot != 0 && slotStatus.ActiveSlot != slot
+		state.recoverable = !slotContradicted
+	}
 	return state, nil
 }
 
@@ -305,7 +350,11 @@ func qmiICCIDForSlot(status uim.SlotStatus, slot uint8) (string, error) {
 	if slot == 0 || int(slot) > len(status.Slots) {
 		return "", nil
 	}
-	iccid, err := decodeQMIICCID(status.Slots[slot-1].ICCID)
+	raw := status.Slots[slot-1].ICCID
+	if len(raw) == 0 {
+		return "", nil
+	}
+	iccid, err := decodeQMIICCID(raw)
 	if err != nil {
 		return "", fmt.Errorf("decode QMI slot %d ICCID: %w", slot, err)
 	}

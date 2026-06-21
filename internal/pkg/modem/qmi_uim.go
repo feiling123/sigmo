@@ -32,10 +32,9 @@ type qmiUIMReader interface {
 
 var openQMIUIMReader = openUICCQMIUIMReader
 
-func qmiActivateProvisioningIfSimMissing(ctx context.Context, m *Modem) error {
-	slot, err := qmiSIMSlot(m)
-	if err != nil {
-		return err
+func qmiActivateProvisioningIfSimMissing(ctx context.Context, m *Modem, slot uint8) error {
+	if slot == 0 {
+		return errors.New("QMI SIM slot is required")
 	}
 	reader, err := openQMIUIMReader(ctx, m.PrimaryPort, slot)
 	if err != nil {
@@ -81,10 +80,9 @@ func qmiActivateProvisioningIfSimMissing(ctx context.Context, m *Modem) error {
 	return nil
 }
 
-func qmiRepowerSimCard(ctx context.Context, m *Modem) error {
-	slot, err := qmiSIMSlot(m)
-	if err != nil {
-		return err
+func qmiRepowerSimCard(ctx context.Context, m *Modem, slot uint8) error {
+	if slot == 0 {
+		return errors.New("QMI SIM slot is required")
 	}
 	reader, err := openQMIUIMReader(ctx, m.PrimaryPort, slot)
 	if err != nil {
@@ -227,6 +225,15 @@ func qmiUSIMReady(card uim.Card, app uim.CardApplication) bool {
 		app.Type == uim.ApplicationTypeUSIM &&
 		app.State == uim.ApplicationStateReady &&
 		app.PersonalizationState == uim.PersonalizationStateReady
+}
+
+func qmiUSIMPresentForSlot(status uim.CardStatus, slot uint8) bool {
+	card, ok := qmiCardForSlot(status, slot)
+	if !ok || card.State != uim.CardStatePresent {
+		return false
+	}
+	_, ok = qmiUSIMApplication(card)
+	return ok
 }
 
 func qmiUSIMReadyForSlot(status uim.CardStatus, slot uint8) bool {

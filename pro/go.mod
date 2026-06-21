@@ -6,7 +6,7 @@ require (
 	github.com/damonto/euicc-go v1.1.3-0.20260620090222-49b24d9d0215
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260611125016-ab0c78f7aadd
-	github.com/damonto/uicc-go v0.0.0-20260621104144-6601409990f1
+	github.com/damonto/uicc-go v0.0.0-20260621125331-b612348b0c1e
 	github.com/damonto/vowifi-go v0.0.0-20260615134955-e4fd729def50
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3

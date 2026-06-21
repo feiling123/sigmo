@@ -4,8 +4,8 @@ github.com/damonto/euicc-go v1.1.3-0.20260620090222-49b24d9d0215 h1:NQltymMpT5jV
 github.com/damonto/euicc-go v1.1.3-0.20260620090222-49b24d9d0215/go.mod h1:pVFSX4GXCI1Gvj5v65RryhQ+qaQl2cQJGBfgwD62e1M=
 github.com/damonto/ts43-go v0.0.0-20260611125016-ab0c78f7aadd h1:dxwNzmT5RFobzB0U+RPT3mUg7apMejvRnU6jFdFgQSs=
 github.com/damonto/ts43-go v0.0.0-20260611125016-ab0c78f7aadd/go.mod h1:+Gi3AP7ENR3brC4ai1LmupPRkH4NFuu3U0i749kfMU0=
-github.com/damonto/uicc-go v0.0.0-20260621104144-6601409990f1 h1:efLuarlBwoZ9DPH7BJYiLeiku8PUeniVIot4ciM9dCg=
-github.com/damonto/uicc-go v0.0.0-20260621104144-6601409990f1/go.mod h1:4il4tcO0GJ2Bn8827RWDiMxNOnQpEApy3pwKliaR9uc=
+github.com/damonto/uicc-go v0.0.0-20260621125331-b612348b0c1e h1:hC6bAfY07oFVvWzvImiLlBYqvwNgISUqU4yCvS+n/pg=
+github.com/damonto/uicc-go v0.0.0-20260621125331-b612348b0c1e/go.mod h1:4il4tcO0GJ2Bn8827RWDiMxNOnQpEApy3pwKliaR9uc=
 github.com/damonto/vowifi-go v0.0.0-20260615134955-e4fd729def50 h1:5ihy0PVhDD1OyM997EayfWpTZql+gGimhoex+pPOk/I=
 github.com/damonto/vowifi-go v0.0.0-20260615134955-e4fd729def50/go.mod h1:tZxUMs6Q/C+cxUywzL6kPmp/3Jd3T4XzbreRgRVKKlA=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

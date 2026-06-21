@@ -1,0 +1,319 @@
+package modem
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	uiccmbim "github.com/damonto/uicc-go/mbim"
+	"github.com/damonto/uicc-go/qcom/uim"
+)
+
+var errFakeMBIMATR = errors.New("mbim atr")
+
+func TestATRSupportsEUICC(t *testing.T) {
+	tests := []struct {
+		name string
+		atr  []byte
+		want bool
+	}{
+		{
+			name: "eUICC global interface byte",
+			atr:  []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+			want: true,
+		},
+		{
+			name: "TS 102 221 eUICC ATR",
+			atr:  []byte{0x3B, 0x97, 0x93, 0x80, 0x3F, 0xC7, 0x82, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x13, 0x10},
+			want: true,
+		},
+		{
+			name: "normal UICC ATR",
+			atr:  []byte{0x3B, 0x00},
+			want: false,
+		},
+		{
+			name: "T=15 without eUICC bit",
+			atr:  []byte{0x3B, 0x80, 0x81, 0x2F, 0x80, 0xAE},
+			want: false,
+		},
+		{
+			name: "T=15 without removable UICC bit",
+			atr:  []byte{0x3B, 0x80, 0x81, 0x2F, 0x02, 0x2C},
+			want: false,
+		},
+		{
+			name: "bad checksum",
+			atr:  []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0x00},
+			want: false,
+		},
+		{
+			name: "TD1 T=15 is invalid for eUICC marker",
+			atr:  []byte{0x3B, 0x80, 0x1F, 0x20, 0x82, 0x3D},
+			want: false,
+		},
+		{
+			name: "empty ATR",
+			atr:  nil,
+			want: false,
+		},
+		{
+			name: "bad convention",
+			atr:  []byte{0x00, 0x00},
+			want: false,
+		},
+		{
+			name: "truncated interface byte",
+			atr:  []byte{0x3B, 0x80},
+			want: false,
+		},
+		{
+			name: "truncated historical bytes",
+			atr:  []byte{0x3B, 0x02, 0x80},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := atrSupportsEUICC(tt.atr); got != tt.want {
+				t.Fatalf("atrSupportsEUICC() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSupportsEUICCQMI(t *testing.T) {
+	tests := []struct {
+		name       string
+		modem      *Modem
+		status     uim.SlotStatus
+		want       bool
+		wantSlot   uint8
+		wantOpened bool
+	}{
+		{
+			name: "ATR marks eUICC",
+			modem: testATRModem(ModemPortTypeQmi, ModemPort{
+				PortType: ModemPortTypeQmi,
+				Device:   "/dev/cdc-wdm0",
+			}),
+			status: uim.SlotStatus{
+				ActiveSlot: 1,
+				Slots: []uim.Slot{
+					{ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}},
+				},
+			},
+			want:       true,
+			wantSlot:   1,
+			wantOpened: true,
+		},
+		{
+			name: "empty ATR",
+			modem: testATRModem(ModemPortTypeQmi, ModemPort{
+				PortType: ModemPortTypeQmi,
+				Device:   "/dev/cdc-wdm0",
+			}),
+			status: uim.SlotStatus{
+				ActiveSlot: 1,
+				Slots: []uim.Slot{
+					{},
+				},
+			},
+			wantSlot:   1,
+			wantOpened: true,
+		},
+		{
+			name: "ordinary UICC",
+			modem: testATRModem(ModemPortTypeQmi, ModemPort{
+				PortType: ModemPortTypeQmi,
+				Device:   "/dev/cdc-wdm0",
+			}),
+			status: uim.SlotStatus{
+				ActiveSlot: 1,
+				Slots: []uim.Slot{
+					{ATR: []byte{0x3B, 0x00}},
+				},
+			},
+			wantSlot:   1,
+			wantOpened: true,
+		},
+		{
+			name: "uses active slot when primary is unknown",
+			modem: testATRModem(ModemPortTypeQmi, ModemPort{
+				PortType: ModemPortTypeQmi,
+				Device:   "/dev/cdc-wdm0",
+			}),
+			status: uim.SlotStatus{
+				ActiveSlot: 2,
+				Slots: []uim.Slot{
+					{ATR: []byte{0x3B, 0x00}},
+					{ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}},
+				},
+			},
+			want:       true,
+			wantSlot:   1,
+			wantOpened: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &fakeQMIUIMReader{slotStatus: tt.status}
+			withQMIUIMReader(t, tt.modem.PrimaryPort, tt.wantSlot, reader, nil)
+
+			got, err := SupportsEUICC(context.Background(), tt.modem)
+			if err != nil {
+				t.Fatalf("SupportsEUICC() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("SupportsEUICC() = %v, want %v", got, tt.want)
+			}
+			if tt.wantOpened && len(reader.calls) == 0 {
+				t.Fatal("QMI reader was not opened")
+			}
+		})
+	}
+}
+
+func TestSupportsEUICCMBIM(t *testing.T) {
+	tests := []struct {
+		name    string
+		atr     []byte
+		openErr error
+		atrErr  error
+		want    bool
+		wantErr error
+	}{
+		{
+			name: "ATR marks eUICC",
+			atr:  []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+			want: true,
+		},
+		{
+			name: "ordinary UICC",
+			atr:  []byte{0x3B, 0x00},
+		},
+		{
+			name:    "open error",
+			openErr: errFakeMBIMATR,
+			wantErr: errFakeMBIMATR,
+		},
+		{
+			name:    "ATR query error",
+			atrErr:  errFakeMBIMATR,
+			wantErr: errFakeMBIMATR,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &fakeMBIMATRReader{atr: tt.atr, atrErr: tt.atrErr}
+			withMBIMATRReader(t, reader, tt.openErr)
+
+			got, err := SupportsEUICC(context.Background(), testATRModem(ModemPortTypeMbim, ModemPort{
+				PortType: ModemPortTypeMbim,
+				Device:   "/dev/cdc-wdm0",
+			}))
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("SupportsEUICC() error = %v, want %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("SupportsEUICC() = %v, want %v", got, tt.want)
+			}
+			if tt.openErr == nil && !reader.closed {
+				t.Fatal("MBIM reader was not closed")
+			}
+		})
+	}
+}
+
+func TestSupportsEUICCDoesNotProbeATOrUnknown(t *testing.T) {
+	tests := []struct {
+		name  string
+		modem *Modem
+	}{
+		{
+			name: "AT port",
+			modem: testATRModem(ModemPortTypeAt, ModemPort{
+				PortType: ModemPortTypeAt,
+				Device:   "/dev/ttyUSB2",
+			}),
+		},
+		{
+			name:  "unknown port",
+			modem: &Modem{PrimaryPort: "/dev/ttyUSB2"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			failOnATRTransports(t)
+			got, err := SupportsEUICC(context.Background(), tt.modem)
+			if err != nil {
+				t.Fatalf("SupportsEUICC() error = %v", err)
+			}
+			if got {
+				t.Fatal("SupportsEUICC() = true, want false")
+			}
+		})
+	}
+}
+
+type fakeMBIMATRReader struct {
+	atr    []byte
+	atrErr error
+	closed bool
+}
+
+func (r *fakeMBIMATRReader) QueryUiccATR(context.Context) ([]byte, error) {
+	return r.atr, r.atrErr
+}
+
+func (r *fakeMBIMATRReader) Close() error {
+	r.closed = true
+	return nil
+}
+
+func withMBIMATRReader(t *testing.T, reader mbimATRReader, openErr error) {
+	t.Helper()
+
+	old := openMBIMATRReader
+	openMBIMATRReader = func(context.Context, ...uiccmbim.Option) (mbimATRReader, error) {
+		if openErr != nil {
+			return nil, openErr
+		}
+		return reader, nil
+	}
+	t.Cleanup(func() {
+		openMBIMATRReader = old
+	})
+}
+
+func failOnATRTransports(t *testing.T) {
+	t.Helper()
+
+	oldQMI := openQMIUIMReader
+	oldMBIM := openMBIMATRReader
+	openQMIUIMReader = func(context.Context, string, uint8) (qmiUIMReader, error) {
+		t.Fatal("openQMIUIMReader called")
+		return nil, nil
+	}
+	openMBIMATRReader = func(context.Context, ...uiccmbim.Option) (mbimATRReader, error) {
+		t.Fatal("openMBIMATRReader called")
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		openQMIUIMReader = oldQMI
+		openMBIMATRReader = oldMBIM
+	})
+}
+
+func testATRModem(portType ModemPortType, port ModemPort) *Modem {
+	return &Modem{
+		EquipmentIdentifier: "test-imei",
+		PrimaryPort:         port.Device,
+		Ports: []ModemPort{
+			{
+				PortType: portType,
+				Device:   port.Device,
+			},
+		},
+	}
+}
