@@ -78,6 +78,11 @@ func TestIsTransientRestartError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "aborted while modem is reenumerating",
+			err:  errors.New("Aborted: Operation aborted"),
+			want: true,
+		},
+		{
 			name: "other error",
 			err:  errors.New("permission denied"),
 			want: false,
@@ -151,6 +156,17 @@ func TestModemRefreshModemManager(t *testing.T) {
 				ModemInterface + ".Enable": {
 					nil,
 					dbus.Error{Name: dbusErrUnknownObject},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "ignore aborted enable while modem is reenumerating",
+			errors: map[string][]error{
+				ModemInterface + ".Simple.GetStatus": {nil},
+				ModemInterface + ".Enable": {
+					nil,
+					dbus.Error{Name: "org.freedesktop.ModemManager1.Error.Core.Aborted", Body: []any{"Operation aborted"}},
 				},
 			},
 			wantErr: false,

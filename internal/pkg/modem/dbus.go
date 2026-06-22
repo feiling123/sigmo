@@ -105,7 +105,7 @@ func isTransientRestartError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return isUnknownObjectError(err) || isCanceledError(err)
+	return isUnknownObjectError(err) || isCanceledError(err) || isAbortedError(err)
 }
 
 // IsTransientRestartError reports whether a DBus call likely raced with modem re-enumeration.
