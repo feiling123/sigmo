@@ -45,9 +45,6 @@ func (m *Registry) EnsureSIMVisible(ctx context.Context, current *Modem, target 
 }
 
 func (m *Registry) PowerCycleSIM(ctx context.Context, current *Modem, target SIMTarget) (*Modem, error) {
-	if current == nil {
-		return nil, errModemRequired
-	}
 	target = currentSIMTarget(current, target)
 	if !target.valid() {
 		return nil, errors.New("SIM target is required")

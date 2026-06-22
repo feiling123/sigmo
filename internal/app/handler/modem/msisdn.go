@@ -17,8 +17,9 @@ var errMSISDNInvalidNumber = errors.New("invalid phone number")
 var msisdnPhoneRE = regexp.MustCompile(`^\+?[0-9]{1,15}$`)
 
 type msisdn struct {
-	newClient  msisdnClientFactory
-	refreshSIM func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error)
+	newClient            msisdnClientFactory
+	refreshSIM           func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error)
+	waitForReloadedModem func(context.Context, *mmodem.Modem) (*mmodem.Modem, error)
 }
 
 type msisdnClient interface {
@@ -33,7 +34,8 @@ func newMSISDN(registry *mmodem.Registry) *msisdn {
 		newClient: func(device string) (msisdnClient, error) {
 			return msisdnclient.New(device)
 		},
-		refreshSIM: registry.PowerCycleSIM,
+		refreshSIM:           registry.PowerCycleSIM,
+		waitForReloadedModem: registry.WaitForReloadedModem,
 	}
 }
 
@@ -79,6 +81,12 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 			return fmt.Errorf("wait for modem: %w", err)
 		}
 		return fmt.Errorf("refresh SIM after MSISDN update: %w", err)
+	}
+	if _, err := m.waitForReloadedModem(ctx, modem); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("wait for modem: %w", err)
+		}
+		return fmt.Errorf("wait for modem after MSISDN update: %w", err)
 	}
 	return nil
 }
