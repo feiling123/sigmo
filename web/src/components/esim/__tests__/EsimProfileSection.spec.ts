@@ -139,6 +139,14 @@ describe('EsimProfileSection', () => {
     ).toHaveLength(2)
   })
 
+  it('separates active profile quick action items', () => {
+    const wrapper = mountSection()
+    const menus = wrapper.findAllComponents({ name: 'DropdownMenu' })
+
+    expect(menus[0].findAll('hr')).toHaveLength(5)
+    expect(menus[1].findAll('hr')).toHaveLength(2)
+  })
+
   it('emits network connect and disconnect toggles', async () => {
     const wrapper = mountSection({ internetConnected: false })
 

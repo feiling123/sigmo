@@ -353,6 +353,7 @@ watch(detailsOpen, (value) => {
                     @update:model-value="(nextValue) => handleNetworkToggle(profile, nextValue)"
                   />
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   v-if="props.wifiCallingAvailable"
                   class="justify-between gap-4"
@@ -378,6 +379,7 @@ watch(detailsOpen, (value) => {
                     @update:model-value="(nextValue) => handleWiFiCallingToggle(profile, nextValue)"
                   />
                 </DropdownMenuItem>
+                <DropdownMenuSeparator v-if="props.wifiCallingAvailable" />
                 <DropdownMenuItem @click="handlePhoneNumberClick(profile)">
                   {{ t('modemDetail.settings.msisdnTitle') }}
                 </DropdownMenuItem>
