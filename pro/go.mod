@@ -3,7 +3,7 @@ module github.com/damonto/sigmo/pro
 go 1.26.3
 
 require (
-	github.com/damonto/euicc-go v1.1.3-0.20260624160743-3bd0b16f6bf9
+	github.com/damonto/euicc-go v1.1.3-0.20260627101031-4ff9d763be69
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260622030018-3e953eacd018
 	github.com/damonto/uicc-go v0.0.0-20260622025011-5cf36d6c8626
@@ -37,7 +37,7 @@ require (
 	github.com/pion/mdns/v2 v2.1.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.16 // indirect
-	github.com/pion/sctp v1.10.1 // indirect
+	github.com/pion/sctp v1.10.3 // indirect
 	github.com/pion/sdp/v3 v3.0.19 // indirect
 	github.com/pion/srtp/v3 v3.0.12 // indirect
 	github.com/pion/stun/v3 v3.1.6 // indirect
