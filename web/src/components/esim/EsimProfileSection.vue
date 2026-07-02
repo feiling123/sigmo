@@ -10,6 +10,7 @@ import {
   AlertDialog,
   AlertDialogCancel,
   AlertDialogContent,
+  AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -19,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -77,6 +79,27 @@ const esimApi = useEsimApi()
 const profileCount = computed(() => profiles.value.length)
 const hasProfiles = computed(() => profiles.value.length > 0)
 const isLoading = computed(() => props.loading)
+const hasMultipleSEs = computed(
+  () => new Set(profiles.value.map((profile) => profile.seId)).size > 1,
+)
+const profileGroups = computed(() => {
+  const groups = new Map<
+    string,
+    { id: string; label: string; eid?: string; profiles: EsimProfile[] }
+  >()
+  for (const profile of profiles.value) {
+    if (!groups.has(profile.seId)) {
+      groups.set(profile.seId, {
+        id: profile.seId,
+        label: profile.seLabel,
+        eid: profile.seEid,
+        profiles: [],
+      })
+    }
+    groups.get(profile.seId)?.profiles.push(profile)
+  }
+  return Array.from(groups.values())
+})
 
 const toggleOpen = ref(false)
 const toggleProfile = ref<EsimProfile | null>(null)
@@ -147,7 +170,7 @@ const confirmToggle = async () => {
   try {
     const profileName =
       toggleProfile.value?.name ?? t('modemDetail.esim.downloadCompletedFallbackName')
-    await esimApi.enableEsim(props.modemId, toggleProfile.value.iccid)
+    await esimApi.enableEsim(props.modemId, toggleProfile.value.seId, toggleProfile.value.iccid)
     if (!props.refreshModem) {
       toggleProfile.value.enabled = true
     }
@@ -178,7 +201,12 @@ const closeRenameDialog = () => {
 const confirmRename = handleRenameSubmit(async (values) => {
   if (!renameProfile.value) return
   try {
-    await esimApi.updateEsimNickname(props.modemId, renameProfile.value.iccid, values.name)
+    await esimApi.updateEsimNickname(
+      props.modemId,
+      renameProfile.value.seId,
+      renameProfile.value.iccid,
+      values.name,
+    )
     renameProfile.value.name = values.name
     closeRenameDialog()
   } catch (err) {
@@ -203,7 +231,7 @@ const confirmDelete = async (event?: Event) => {
   if (!deleteProfile.value) return
   deleteLoading.value = true
   try {
-    await esimApi.deleteEsim(props.modemId, deleteProfile.value.iccid)
+    await esimApi.deleteEsim(props.modemId, deleteProfile.value.seId, deleteProfile.value.iccid)
     profiles.value = profiles.value.filter((profile) => profile.id !== deleteProfile.value?.id)
     closeDeleteDialog()
   } catch (err) {
@@ -303,105 +331,117 @@ watch(detailsOpen, (value) => {
       {{ t('modemDetail.esim.noProfiles') }}
     </div>
 
-    <div v-else class="space-y-3">
-      <div
-        v-for="profile in profiles"
-        :key="profile.id"
-        class="flex items-center justify-between rounded-lg border bg-card px-4 py-3 shadow-sm transition"
-        :class="profile.enabled ? 'border-primary/40 bg-primary/5' : 'border-transparent'"
-      >
-        <div class="flex min-w-0 items-center gap-3">
-          <EsimProfileAvatar
-            :name="profile.name"
-            :icon="profile.logoUrl"
-            :region-code="profile.regionCode"
-          />
-          <div class="min-w-0">
-            <p class="truncate text-sm font-semibold text-foreground">
-              {{ profile.name }}
-            </p>
-            <p class="truncate text-xs text-muted-foreground">
-              {{ profile.iccid }}
-            </p>
-          </div>
+    <div v-else class="space-y-4">
+      <div v-for="group in profileGroups" :key="group.id" class="space-y-2">
+        <div v-if="hasMultipleSEs" class="flex min-w-0 items-center justify-between gap-3 px-1">
+          <p class="min-w-0 truncate text-xs font-semibold text-muted-foreground">
+            {{ group.label }}: {{ group.eid || 'N/A' }}
+          </p>
+          <Badge variant="outline" class="shrink-0 text-[10px]">
+            {{ group.profiles.length }}
+          </Badge>
         </div>
+        <div
+          v-for="profile in group.profiles"
+          :key="profile.id"
+          class="flex items-center justify-between rounded-lg border bg-card px-4 py-3 shadow-sm transition"
+          :class="profile.enabled ? 'border-primary/40 bg-primary/5' : 'border-transparent'"
+        >
+          <div class="flex min-w-0 items-center gap-3">
+            <EsimProfileAvatar
+              :name="profile.name"
+              :icon="profile.logoUrl"
+              :region-code="profile.regionCode"
+            />
+            <div class="min-w-0">
+              <p class="truncate text-sm font-semibold text-foreground">
+                {{ profile.name }}
+              </p>
+              <p class="truncate text-xs text-muted-foreground">
+                {{ profile.iccid }}
+              </p>
+            </div>
+          </div>
 
-        <div class="flex items-center gap-3">
-          <Switch
-            :model-value="profile.enabled"
-            @update:model-value="(nextValue) => handleToggle(profile, nextValue)"
-          />
+          <div class="flex items-center gap-3">
+            <Switch
+              :model-value="profile.enabled"
+              @update:model-value="(nextValue) => handleToggle(profile, nextValue)"
+            />
 
-          <DropdownMenu @update:open="(open) => handleProfileActionsOpenChange(profile, open)">
-            <DropdownMenuTrigger as-child>
-              <Button variant="ghost" size="icon" type="button" aria-label="Profile actions">
-                <EllipsisVertical class="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="w-56">
-              <template v-if="profile.enabled">
-                <DropdownMenuItem
-                  class="justify-between gap-4"
-                  :disabled="props.internetBusy"
-                  @click="handleNetworkToggle(profile, !props.internetConnected)"
-                >
-                  <span>{{ t('modemDetail.settings.networkTitle') }}</span>
-                  <Switch
-                    :model-value="props.internetConnected"
+            <DropdownMenu @update:open="(open) => handleProfileActionsOpenChange(profile, open)">
+              <DropdownMenuTrigger as-child>
+                <Button variant="ghost" size="icon" type="button" aria-label="Profile actions">
+                  <EllipsisVertical class="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" class="w-56">
+                <template v-if="profile.enabled">
+                  <DropdownMenuItem
+                    class="justify-between gap-4"
                     :disabled="props.internetBusy"
-                    @click.stop
-                    @update:model-value="(nextValue) => handleNetworkToggle(profile, nextValue)"
-                  />
+                    @click="handleNetworkToggle(profile, !props.internetConnected)"
+                  >
+                    <span>{{ t('modemDetail.settings.networkTitle') }}</span>
+                    <Switch
+                      :model-value="props.internetConnected"
+                      :disabled="props.internetBusy"
+                      @click.stop
+                      @update:model-value="(nextValue) => handleNetworkToggle(profile, nextValue)"
+                    />
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    v-if="props.wifiCallingAvailable"
+                    class="justify-between gap-4"
+                    :disabled="props.wifiCallingBusy"
+                    @click="
+                      handleWiFiCallingToggle(
+                        profile,
+                        !(props.wifiCallingEnabled && props.wifiCallingConnected),
+                      )
+                    "
+                  >
+                    <span>{{ t('modemDetail.settings.wifiCallingTitle') }}</span>
+                    <Spinner
+                      v-if="props.wifiCallingBusy"
+                      data-testid="wifi-calling-quick-action-loading"
+                      class="size-4 text-muted-foreground"
+                    />
+                    <Switch
+                      v-else
+                      :model-value="props.wifiCallingEnabled && props.wifiCallingConnected"
+                      :disabled="props.wifiCallingBusy"
+                      @click.stop
+                      @update:model-value="
+                        (nextValue) => handleWiFiCallingToggle(profile, nextValue)
+                      "
+                    />
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator v-if="props.wifiCallingAvailable" />
+                  <DropdownMenuItem @click="handlePhoneNumberClick(profile)">
+                    {{ t('modemDetail.settings.msisdnTitle') }}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </template>
+                <DropdownMenuItem @click="openDetailsDialog(profile)">
+                  {{ t('modemDetail.actions.viewDetails') }}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem @click="handleRenameClick(profile)">
+                  {{ t('modemDetail.actions.rename') }}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  v-if="props.wifiCallingAvailable"
-                  class="justify-between gap-4"
-                  :disabled="props.wifiCallingBusy"
-                  @click="
-                    handleWiFiCallingToggle(
-                      profile,
-                      !(props.wifiCallingEnabled && props.wifiCallingConnected),
-                    )
-                  "
+                  :disabled="profile.enabled"
+                  :class="profile.enabled ? 'text-muted-foreground' : 'text-destructive'"
+                  @click="handleDeleteClick(profile)"
                 >
-                  <span>{{ t('modemDetail.settings.wifiCallingTitle') }}</span>
-                  <Spinner
-                    v-if="props.wifiCallingBusy"
-                    data-testid="wifi-calling-quick-action-loading"
-                    class="size-4 text-muted-foreground"
-                  />
-                  <Switch
-                    v-else
-                    :model-value="props.wifiCallingEnabled && props.wifiCallingConnected"
-                    :disabled="props.wifiCallingBusy"
-                    @click.stop
-                    @update:model-value="(nextValue) => handleWiFiCallingToggle(profile, nextValue)"
-                  />
+                  {{ t('modemDetail.actions.delete') }}
                 </DropdownMenuItem>
-                <DropdownMenuSeparator v-if="props.wifiCallingAvailable" />
-                <DropdownMenuItem @click="handlePhoneNumberClick(profile)">
-                  {{ t('modemDetail.settings.msisdnTitle') }}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </template>
-              <DropdownMenuItem @click="openDetailsDialog(profile)">
-                {{ t('modemDetail.actions.viewDetails') }}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem @click="handleRenameClick(profile)">
-                {{ t('modemDetail.actions.rename') }}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                :disabled="profile.enabled"
-                :class="profile.enabled ? 'text-muted-foreground' : 'text-destructive'"
-                @click="handleDeleteClick(profile)"
-              >
-                {{ t('modemDetail.actions.delete') }}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </div>
     </div>
@@ -411,6 +451,9 @@ watch(detailsOpen, (value) => {
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>{{ togglePrompt }}</AlertDialogTitle>
+        <AlertDialogDescription class="sr-only">
+          {{ togglePrompt }}
+        </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
         <AlertDialogCancel @click="closeToggleDialog" :disabled="toggleLoading">
@@ -431,6 +474,9 @@ watch(detailsOpen, (value) => {
     <DialogContent class="sm:max-w-sm">
       <DialogHeader>
         <DialogTitle>{{ t('modemDetail.actions.rename') }}</DialogTitle>
+        <DialogDescription class="sr-only">
+          {{ t('modemDetail.esim.nickname') }}
+        </DialogDescription>
       </DialogHeader>
       <form class="space-y-4" @submit="confirmRename">
         <FormField v-slot="{ componentField }" name="name" :validateOnBlur="false">
@@ -475,6 +521,9 @@ watch(detailsOpen, (value) => {
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>{{ deletePrompt }}</AlertDialogTitle>
+        <AlertDialogDescription class="sr-only">
+          {{ deletePrompt }}
+        </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
         <AlertDialogCancel @click="closeDeleteDialog" :disabled="deleteLoading">

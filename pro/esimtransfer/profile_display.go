@@ -42,8 +42,8 @@ func profileOwnerResponse(owner sgp22.OperatorId) ProfileOwnerResponse {
 	}
 }
 
-func profilePreviewFrom(info *sgp22.ProfileInfo) downloadProfilePreview {
-	return downloadProfilePreview{
+func profilePreviewFrom(info *sgp22.ProfileInfo) downloadPreview {
+	return downloadPreview{
 		ICCID:               info.ICCID.String(),
 		ServiceProviderName: info.ServiceProviderName,
 		ProfileName:         info.ProfileName,

@@ -24,7 +24,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
-func (s *Service) openSource(ctx context.Context, currentSettings *settings.Settings, start Start) (*sourceEndpoint, error) {
+func (s *transferRunner) openSource(ctx context.Context, currentSettings *settings.Settings, start startRequest) (*sourceConnection, error) {
 	switch start.SourceType {
 	case SourceModem:
 		modem, err := s.registry.Find(ctx, start.SourceID)
@@ -41,7 +41,7 @@ func (s *Service) openSource(ctx context.Context, currentSettings *settings.Sett
 			return nil, fmt.Errorf("read source IMEI: %w", err)
 		}
 		device := ts43Device(imei)
-		return &sourceEndpoint{
+		return &sourceConnection{
 			channel: channel,
 			release: release,
 			device:  device,
@@ -51,7 +51,7 @@ func (s *Service) openSource(ctx context.Context, currentSettings *settings.Sett
 		if err != nil {
 			return nil, fmt.Errorf("open CCID reader: %w", err)
 		}
-		return &sourceEndpoint{
+		return &sourceConnection{
 			channel: channel,
 			release: release,
 			device:  ts43Device(start.SourceIMEI),
@@ -178,11 +178,11 @@ func sourceFromReader(ctx context.Context, reader usimcard.Reader, logger *slog.
 	return source, releaseSource(source, logger), nil
 }
 
-func (s *Service) activateSourceProfile(ctx context.Context, currentSettings *settings.Settings, start Start, candidate profileCandidate) error {
-	if candidate.response.Type == ProfilePhysical {
+func (s *transferRunner) activateSourceProfile(ctx context.Context, currentSettings *settings.Settings, start startRequest, option ProfileResponse) error {
+	if option.Type == ProfilePhysical {
 		return nil
 	}
-	iccid, err := sgp22.NewICCID(candidate.response.ICCID)
+	iccid, err := sgp22.NewICCID(option.ICCID)
 	if err != nil {
 		return fmt.Errorf("parse source ICCID: %w", err)
 	}
@@ -192,7 +192,7 @@ func (s *Service) activateSourceProfile(ctx context.Context, currentSettings *se
 		if err != nil {
 			return err
 		}
-		return s.enableModemSourceProfile(ctx, modem, iccid)
+		return s.enableModemSourceProfile(ctx, modem, option.SEID, iccid)
 	case SourceCCID:
 		return enableCCIDSourceProfile(currentSettings, start, iccid)
 	default:
@@ -200,13 +200,13 @@ func (s *Service) activateSourceProfile(ctx context.Context, currentSettings *se
 	}
 }
 
-func enableCCIDSourceProfile(currentSettings *settings.Settings, start Start, iccid sgp22.ICCID) error {
+func enableCCIDSourceProfile(currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
 	reader, err := openCCIDLPAReader(start.SourceID)
 	if err != nil {
 		return fmt.Errorf("open CCID reader: %w", err)
 	}
 	logger := sourceLogger(start)
-	client, err := ilpa.NewWithChannel(ilpa.ChannelConfig{
+	sourceLPA, err := ilpa.NewWithChannel(ilpa.ChannelConfig{
 		LockKey:  sourceLockKey(start.SourceType, start.SourceID),
 		Channel:  reader,
 		Settings: currentSettings,
@@ -216,24 +216,24 @@ func enableCCIDSourceProfile(currentSettings *settings.Settings, start Start, ic
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
 	defer func() {
-		if cerr := client.Close(); cerr != nil {
-			client.Logger().Warn("close source LPA client", "error", cerr)
+		if cerr := sourceLPA.Close(); cerr != nil {
+			sourceLPA.Logger().Warn("close source LPA client", "error", cerr)
 		}
 	}()
-	profiles, err := client.ListProfile(iccid, nil)
+	profiles, err := sourceLPA.ListProfile(iccid, nil)
 	if err != nil {
 		return fmt.Errorf("list source profiles: %w", err)
 	}
 	if activeProfile(profiles, iccid) {
 		return nil
 	}
-	if err := client.EnableProfile(iccid, true); err != nil {
+	if err := sourceLPA.EnableProfile(iccid, true); err != nil {
 		return fmt.Errorf("enable source profile: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) deleteSourceProfile(ctx context.Context, currentSettings *settings.Settings, start Start, rawICCID string) error {
+func (s *transferRunner) deleteSourceProfile(ctx context.Context, currentSettings *settings.Settings, start startRequest, rawICCID string) error {
 	iccid, err := sgp22.NewICCID(rawICCID)
 	if err != nil {
 		return fmt.Errorf("parse source ICCID: %w", err)
@@ -251,7 +251,7 @@ func (s *Service) deleteSourceProfile(ctx context.Context, currentSettings *sett
 	}
 }
 
-func (s *Service) deleteModemSourceProfile(ctx context.Context, currentSettings *settings.Settings, start Start, iccid sgp22.ICCID) error {
+func (s *transferRunner) deleteModemSourceProfile(ctx context.Context, currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
 	modem, err := s.registry.Find(ctx, start.SourceID)
 	if err != nil {
 		return err
@@ -260,69 +260,89 @@ func (s *Service) deleteModemSourceProfile(ctx context.Context, currentSettings 
 	if err != nil {
 		return err
 	}
-	if fallback, ok := fallbackProfile(profiles, iccid); ok {
-		if err := s.enableModemSourceProfile(ctx, modem, fallback.ICCID); err != nil {
+	if fallback, ok := fallbackModemProfile(profiles, iccid); ok {
+		if err := s.enableModemSourceProfile(ctx, modem, fallback.seID, fallback.profile.ICCID); err != nil {
 			return err
 		}
 		modem, err = s.registry.Find(ctx, start.SourceID)
 		if err != nil {
 			return err
 		}
-		return s.deleteModemProfile(ctx, modem, iccid)
+		return s.deleteModemProfile(ctx, modem, sourceProfileSEID(start.ProfileID), iccid)
 	}
-	client, err := ilpa.New(modem, currentSettings)
+	se, err := ilpa.ResolveSE(modem, sourceProfileSEID(start.ProfileID))
+	if err != nil {
+		return fmt.Errorf("resolve source eUICC SE: %w", err)
+	}
+	sourceLPA, err := ilpa.NewWithAID(modem, currentSettings, se.AID)
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
 	defer func() {
-		if cerr := client.Close(); cerr != nil {
-			client.Logger().Warn("close source LPA client", "error", cerr)
+		if cerr := sourceLPA.Close(); cerr != nil {
+			sourceLPA.Logger().Warn("close source LPA client", "error", cerr)
 		}
 	}()
-	if err := client.Delete(iccid); err != nil {
+	if err := sourceLPA.Delete(iccid); err != nil {
 		return fmt.Errorf("delete source profile: %w", err)
 	}
 	return nil
 }
 
-func sourceModemProfiles(modem *mmodem.Modem, currentSettings *settings.Settings) ([]*sgp22.ProfileInfo, error) {
-	client, err := ilpa.New(modem, currentSettings)
-	if err != nil {
-		return nil, fmt.Errorf("create source LPA client: %w", err)
-	}
-	defer func() {
-		if cerr := client.Close(); cerr != nil {
-			client.Logger().Warn("close source LPA client", "error", cerr)
-		}
-	}()
-	profiles, err := client.ListProfile(nil, nil)
-	if err != nil {
-		return nil, fmt.Errorf("list source profiles: %w", err)
-	}
-	return profiles, nil
+type sourceModemProfile struct {
+	seID    string
+	profile *sgp22.ProfileInfo
 }
 
-func (s *Service) enableModemSourceProfile(ctx context.Context, modem *mmodem.Modem, iccid sgp22.ICCID) error {
+func sourceModemProfiles(modem *mmodem.Modem, currentSettings *settings.Settings) ([]sourceModemProfile, error) {
+	ses, err := ilpa.DiscoverSEs(modem)
+	if err != nil {
+		return nil, fmt.Errorf("discover source eUICC SEs: %w", err)
+	}
+	out := []sourceModemProfile{}
+	for _, se := range ses {
+		sourceLPA, err := ilpa.NewWithAID(modem, currentSettings, se.AID)
+		if err != nil {
+			return nil, fmt.Errorf("create source LPA client for %s: %w", se.ID, err)
+		}
+		profiles, err := sourceLPA.ListProfile(nil, nil)
+		if err != nil {
+			if cerr := sourceLPA.Close(); cerr != nil {
+				sourceLPA.Logger().Warn("close source LPA client", "error", cerr)
+			}
+			return nil, fmt.Errorf("list source profiles for %s: %w", se.ID, err)
+		}
+		for _, profile := range profiles {
+			out = append(out, sourceModemProfile{seID: se.ID, profile: profile})
+		}
+		if cerr := sourceLPA.Close(); cerr != nil {
+			sourceLPA.Logger().Warn("close source LPA client", "error", cerr)
+		}
+	}
+	return out, nil
+}
+
+func (s *transferRunner) enableModemSourceProfile(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
 	if s.enableProfile == nil {
 		return errors.New("enable profile dependency is missing")
 	}
-	return s.enableProfile(ctx, modem, iccid)
+	return s.enableProfile(ctx, modem, seID, iccid)
 }
 
-func (s *Service) deleteModemProfile(ctx context.Context, modem *mmodem.Modem, iccid sgp22.ICCID) error {
+func (s *transferRunner) deleteModemProfile(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
 	if s.deleteProfile == nil {
 		return errors.New("delete profile dependency is missing")
 	}
-	return s.deleteProfile(ctx, modem, iccid)
+	return s.deleteProfile(ctx, modem, seID, iccid)
 }
 
-func deleteCCIDSourceProfile(currentSettings *settings.Settings, start Start, iccid sgp22.ICCID) error {
+func deleteCCIDSourceProfile(currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
 	reader, err := openCCIDLPAReader(start.SourceID)
 	if err != nil {
 		return fmt.Errorf("open CCID reader: %w", err)
 	}
 	logger := sourceLogger(start)
-	client, err := ilpa.NewWithChannel(ilpa.ChannelConfig{
+	sourceLPA, err := ilpa.NewWithChannel(ilpa.ChannelConfig{
 		LockKey:  sourceLockKey(start.SourceType, start.SourceID),
 		Channel:  reader,
 		Settings: currentSettings,
@@ -332,23 +352,41 @@ func deleteCCIDSourceProfile(currentSettings *settings.Settings, start Start, ic
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
 	defer func() {
-		if cerr := client.Close(); cerr != nil {
-			client.Logger().Warn("close source LPA client", "error", cerr)
+		if cerr := sourceLPA.Close(); cerr != nil {
+			sourceLPA.Logger().Warn("close source LPA client", "error", cerr)
 		}
 	}()
-	profiles, err := client.ListProfile(nil, nil)
+	profiles, err := sourceLPA.ListProfile(nil, nil)
 	if err != nil {
 		return fmt.Errorf("list source profiles: %w", err)
 	}
 	if fallback, ok := fallbackProfile(profiles, iccid); ok && fallback.ProfileState != sgp22.ProfileEnabled {
-		if err := client.EnableProfile(fallback.ICCID, true); err != nil {
+		if err := sourceLPA.EnableProfile(fallback.ICCID, true); err != nil {
 			return fmt.Errorf("enable source fallback profile: %w", err)
 		}
 	}
-	if err := client.Delete(iccid); err != nil {
+	if err := sourceLPA.Delete(iccid); err != nil {
 		return fmt.Errorf("delete source profile: %w", err)
 	}
 	return nil
+}
+
+func sourceProfileSEID(profileID string) string {
+	seID, _, ok := strings.Cut(profileID, ":")
+	if !ok {
+		return ilpa.SEIDDefault
+	}
+	return seID
+}
+
+func fallbackModemProfile(profiles []sourceModemProfile, source sgp22.ICCID) (sourceModemProfile, bool) {
+	for _, profile := range profiles {
+		if profile.profile == nil || profile.profile.ICCID.String() == source.String() {
+			continue
+		}
+		return profile, true
+	}
+	return sourceModemProfile{}, false
 }
 
 func fallbackProfile(profiles []*sgp22.ProfileInfo, source sgp22.ICCID) (*sgp22.ProfileInfo, bool) {
@@ -387,7 +425,7 @@ func sourceLockKey(sourceType SourceType, sourceID string) string {
 	return string(sourceType) + ":" + sourceID
 }
 
-func sourceLogger(start Start) *slog.Logger {
+func sourceLogger(start startRequest) *slog.Logger {
 	switch start.SourceType {
 	case SourceCCID:
 		logger := mmodem.LoggerForIMEI(start.SourceIMEI)

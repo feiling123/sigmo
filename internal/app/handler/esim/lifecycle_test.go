@@ -124,7 +124,7 @@ func TestEnableSessionEnable(t *testing.T) {
 			var ensureCalled bool
 			l := &lifecycle{
 				settings: &settings.Settings{},
-				newClient: func(*mmodem.Modem, *settings.Settings) (lifecycleClient, error) {
+				newClient: func(*mmodem.Modem, *settings.Settings, string) (lifecycleClient, error) {
 					if len(factoryClients) == 0 {
 						return &fakeLifecycleClient{profiles: disabledProfiles(iccid)}, nil
 					}

@@ -19,7 +19,7 @@ import (
 
 type Handler struct {
 	registry *mmodem.Registry
-	service  *Service
+	runner   *transferRunner
 }
 
 const (
@@ -41,20 +41,23 @@ var transferWSUpgrader = websocket.Upgrader{
 func NewHandler(cfg Config) *Handler {
 	return &Handler{
 		registry: cfg.Registry,
-		service:  New(cfg),
+		runner:   newTransferRunner(cfg),
 	}
 }
 
 func RegisterRoutes(group *echo.Group, cfg Config) {
 	h := NewHandler(cfg)
-	group.GET("/modems/:id/esim-transfer-sources", h.Sources)
-	group.POST("/modems/:id/esim-transfer-profile-queries", h.Profiles)
-	group.GET("/modems/:id/esim-transfer-sessions", h.Transfer)
+	group.GET("/modems/:id/esim-transfers/sources", h.Sources)
+	group.POST("/modems/:id/esim-transfers/source-profiles", h.Profiles)
+	group.GET("/modems/:id/esim-transfers/sessions", h.Transfer)
 }
 
 func ConfigFromCore(core *coreesim.Handler, cfg Config) Config {
 	cfg.EnableProfile = core.EnableProfile
-	cfg.DeleteProfile = core.DeleteProfile
+	cfg.DeleteProfile = func(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
+		_ = ctx
+		return core.DeleteProfile(modem, seID, iccid)
+	}
 	return cfg
 }
 
@@ -64,7 +67,7 @@ func (h *Handler) Sources(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeListTransferSourcesFailed)
 	}
-	response, err := h.service.Sources(ctx, target)
+	response, err := h.runner.Sources(ctx, target)
 	if err != nil {
 		return httpapi.Internal(c, errorCodeListTransferSourcesFailed, err)
 	}
@@ -81,7 +84,7 @@ func (h *Handler) Profiles(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return httpapi.BadRequest(c, errorCodeTransferInvalidRequest, err)
 	}
-	profiles, err := h.service.Profiles(ctx, target, req)
+	profiles, err := h.runner.Profiles(ctx, target, req)
 	if err != nil {
 		return transferProfileError(c, err)
 	}
@@ -100,7 +103,7 @@ func (h *Handler) Transfer(c *echo.Context) error {
 	}
 	defer conn.Close()
 
-	return h.service.Serve(ctx, conn, target)
+	return h.runner.Serve(ctx, conn, target)
 }
 
 func transferProfileError(c *echo.Context, err error) error {
@@ -123,14 +126,15 @@ func profileActionConfig(core *coreesim.Handler, cfg Config) (Config, error) {
 	if core == nil {
 		return Config{}, errors.New("eSIM handler is required")
 	}
-	cfg.EnableProfile = func(ctx context.Context, modem *mmodem.Modem, iccid sgp22.ICCID) error {
-		if err := core.EnableProfile(ctx, modem, iccid); err != nil {
+	cfg.EnableProfile = func(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
+		if err := core.EnableProfile(ctx, modem, seID, iccid); err != nil {
 			return fmt.Errorf("enable profile: %w", err)
 		}
 		return nil
 	}
-	cfg.DeleteProfile = func(ctx context.Context, modem *mmodem.Modem, iccid sgp22.ICCID) error {
-		if err := core.DeleteProfile(ctx, modem, iccid); err != nil {
+	cfg.DeleteProfile = func(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
+		_ = ctx
+		if err := core.DeleteProfile(modem, seID, iccid); err != nil {
 			return fmt.Errorf("delete profile: %w", err)
 		}
 		return nil

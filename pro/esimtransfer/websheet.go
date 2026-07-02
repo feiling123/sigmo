@@ -13,7 +13,7 @@ import (
 	"github.com/damonto/sigmo/pro/websheet"
 )
 
-func (s *Service) handleWebsheet(ctx context.Context, session *session, active *activeSession, result *ts43.Result, event ts43.WebsheetEvent) (*ts43.Result, error) {
+func (s *transferRunner) handleWebsheet(ctx context.Context, session *wsSession, active *transferState, result *ts43.Result, event ts43.WebsheetEvent) (*ts43.Result, error) {
 	if s.websheets == nil {
 		return result, errWebsheetUnavailable
 	}
@@ -29,8 +29,8 @@ func (s *Service) handleWebsheet(ctx context.Context, session *session, active *
 	defer s.websheets.Delete(websheetSession.Info().ID)
 
 	info := websheetSession.Info()
-	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stageWebsheet})
-	session.sendIfConnected(serverMessage{Type: wsTypeWebsheet, Websheet: &info})
+	session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stageWebsheet})
+	session.sendIfConnected(wsServerMessage{Type: wsTypeWebsheet, Websheet: &info})
 
 	callback, err := websheetSession.WaitCallback(ctx)
 	if err != nil {
@@ -40,7 +40,7 @@ func (s *Service) handleWebsheet(ctx context.Context, session *session, active *
 	if err != nil {
 		return result, err
 	}
-	next, err := active.client.Continue(ctx, result, ts43.ContinueRequest{Websheet: answer})
+	next, err := active.ts43Client.Continue(ctx, result, ts43.ContinueRequest{Websheet: answer})
 	if err != nil {
 		if errors.Is(err, ts43.ErrWebsheetDismissed) {
 			return next, errCarrierDismissed

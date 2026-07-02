@@ -76,6 +76,8 @@ vi.mock('@/composables/useModemMsisdn', async () => {
 
 const profile: EsimProfile = {
   id: 'profile-1',
+  seId: 'default',
+  seLabel: 'eUICC',
   name: 'Line',
   iccid: 'iccid-1',
   enabled: true,
@@ -128,7 +130,10 @@ describe('useEsimProfileQuickActions', () => {
         finishConnect = resolve
       }),
     )
-    const actions = useActions(computed(() => true), computed(() => false))
+    const actions = useActions(
+      computed(() => true),
+      computed(() => false),
+    )
 
     expect(harness.internetConnectionEnabled?.value).toBe(false)
 

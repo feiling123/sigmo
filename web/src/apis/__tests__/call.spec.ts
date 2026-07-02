@@ -184,7 +184,7 @@ describe('useCallApi', () => {
 
   it('builds WebRTC session WebSocket URLs', () => {
     expect(buildWebRTCSessionUrl('modem-1', 'call/1')).toContain(
-      '/api/v1/modems/modem-1/calls/call%2F1/webrtc-sessions',
+      '/api/v1/modems/modem-1/calls/call%2F1/webrtc/sessions',
     )
   })
 })

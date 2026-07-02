@@ -8,11 +8,11 @@ import (
 	"github.com/damonto/ts43-go"
 )
 
-func (s *session) userInput(ctx context.Context, event ts43.UserInputEvent) (*ts43.UserInputResult, error) {
+func (s *wsSession) userInput(ctx context.Context, event ts43.UserInputEvent) (*ts43.UserInputResult, error) {
 	message := event.Message
-	if err := s.send(serverMessage{
+	if err := s.send(wsServerMessage{
 		Type: wsTypeUserInput,
-		Input: &userInputMessage{
+		Input: &wsUserInputPrompt{
 			Text:         message.Text,
 			AcceptLabel:  message.AcceptButtonLabel,
 			RejectLabel:  message.RejectButtonLabel,
@@ -33,8 +33,8 @@ func (s *session) userInput(ctx context.Context, event ts43.UserInputEvent) (*ts
 	return result, nil
 }
 
-func (s *session) confirmSourceDeletion(ctx context.Context, iccid string) error {
-	if err := s.send(serverMessage{Type: wsTypeSourceDeletion, ICCID: iccid}); err != nil {
+func (s *wsSession) confirmSourceDeletion(ctx context.Context, iccid string) error {
+	if err := s.send(wsServerMessage{Type: wsTypeSourceDeletion, ICCID: iccid}); err != nil {
 		return err
 	}
 	msg, ok := s.waitForSourceDeletion(ctx)

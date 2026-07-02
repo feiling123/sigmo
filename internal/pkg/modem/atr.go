@@ -14,47 +14,85 @@ type mbimATRReader interface {
 	Close() error
 }
 
-var openMBIMATRReader = func(ctx context.Context, opts ...uiccmbim.Option) (mbimATRReader, error) {
+type qmiUIMOpener func(context.Context, string, uint8) (qmiUIMReader, error)
+type mbimATROpener func(context.Context, ...uiccmbim.Option) (mbimATRReader, error)
+
+type atrReader struct {
+	openQMI  qmiUIMOpener
+	openMBIM mbimATROpener
+}
+
+func newATRReader() atrReader {
+	return atrReader{
+		openQMI:  openQMIUIMReader,
+		openMBIM: openUICCMBIMATRReader,
+	}
+}
+
+func openUICCMBIMATRReader(ctx context.Context, opts ...uiccmbim.Option) (mbimATRReader, error) {
 	return uiccmbim.Open(ctx, opts...)
 }
 
 var knownATRs = [][]byte{
+	{0x3B, 0x9F, 0x96, 0x80, 0x1F, 0xC7, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x15, 0x57, 0x65, 0x73, 0x74, 0x6B, 0x2E, 0x6D, 0x65, 0xC1},       // eSTK.me
 	{0x3B, 0xBF, 0x93, 0x00, 0x80, 0x1F, 0xC6, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x13, 0x57, 0x65, 0x73, 0x74, 0x6B, 0x2E, 0x6D, 0x65, 0xE3}, // eSTK.me
 	{0x3B, 0x9F, 0x96, 0x80, 0x1F, 0xC7, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x1B, 0x57, 0xAA, 0x86, 0x60, 0xF0, 0x02, 0x00, 0x02, 0x5C},       // ECP
 	{0x3B, 0x9F, 0x96, 0x80, 0x1F, 0xC7, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x1B, 0x57, 0xAA, 0x86, 0x60, 0x16, 0x01, 0x00, 0x01, 0xBA},       // ECP
 }
 
-// SupportsEUICC detects eUICC support from modem-exposed card metadata without
-// opening the ISD-R logical channel.
+// SupportsEUICC detects eUICC support from the ATR cached on the SIM object.
+// If ATR is unavailable, callers should fall back to trying ISD-R AIDs.
 func SupportsEUICC(ctx context.Context, m *Modem) (bool, error) {
+	_ = ctx
+	if m == nil || m.Sim == nil || len(m.Sim.ATR) == 0 {
+		return false, nil
+	}
+	return atrSupportsEUICC(m.Sim.ATR), nil
+}
+
+func (r atrReader) read(ctx context.Context, m *Modem) ([]byte, error) {
 	switch m.PrimaryPortType() {
 	case ModemPortTypeQmi:
-		return supportsQMIEUICC(ctx, m)
+		return r.readQMI(ctx, m)
 	case ModemPortTypeMbim:
-		return supportsMBIMEUICC(ctx, m)
+		return r.readMBIM(ctx, m)
 	default:
-		return false, nil
+		return nil, nil
 	}
 }
 
-func supportsQMIEUICC(ctx context.Context, m *Modem) (bool, error) {
+func (r atrReader) qmiOpener() qmiUIMOpener {
+	if r.openQMI != nil {
+		return r.openQMI
+	}
+	return openQMIUIMReader
+}
+
+func (r atrReader) mbimOpener() mbimATROpener {
+	if r.openMBIM != nil {
+		return r.openMBIM
+	}
+	return openUICCMBIMATRReader
+}
+
+func (r atrReader) readQMI(ctx context.Context, m *Modem) ([]byte, error) {
 	requestedSlot, err := qmiSIMSlot(m)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	reader, err := openQMIUIMReader(ctx, m.PrimaryPort, requestedSlot)
+	reader, err := r.qmiOpener()(ctx, m.PrimaryPort, requestedSlot)
 	if err != nil {
-		return false, fmt.Errorf("open QMI UIM reader: %w", err)
+		return nil, fmt.Errorf("open QMI UIM reader: %w", err)
 	}
 	defer closeQMIUIMReader(reader)
 
 	status, err := reader.SlotStatus(ctx)
 	if err != nil {
-		return false, fmt.Errorf("read QMI UIM slot status: %w", err)
+		return nil, fmt.Errorf("read QMI UIM slot status: %w", err)
 	}
 	slot, ok := qmiEUICCSlot(status, m.PrimarySimSlot, requestedSlot)
 	if !ok {
-		return false, nil
+		return nil, nil
 	}
 	m.Logger().Debug(
 		"read QMI UICC ATR",
@@ -62,10 +100,7 @@ func supportsQMIEUICC(ctx context.Context, m *Modem) (bool, error) {
 		"activeSlot", status.ActiveSlot,
 		"atr", formatATR(slot.ATR),
 	)
-	if atrSupportsEUICC(slot.ATR) {
-		return true, nil
-	}
-	return false, nil
+	return slices.Clone(slot.ATR), nil
 }
 
 func qmiEUICCSlot(status uim.SlotStatus, primarySlot uint32, requestedSlot uint8) (uim.Slot, bool) {
@@ -80,14 +115,14 @@ func qmiEUICCSlot(status uim.SlotStatus, primarySlot uint32, requestedSlot uint8
 	return status.Slots[index], true
 }
 
-func supportsMBIMEUICC(ctx context.Context, m *Modem) (bool, error) {
+func (r atrReader) readMBIM(ctx context.Context, m *Modem) ([]byte, error) {
 	slot := int(m.PrimarySimSlot)
 	if slot == 0 {
 		slot = 1
 	}
-	reader, err := openMBIMATRReader(ctx, uiccmbim.WithProxy(m.PrimaryPort), uiccmbim.WithSlot(slot))
+	reader, err := r.mbimOpener()(ctx, uiccmbim.WithProxy(m.PrimaryPort), uiccmbim.WithSlot(slot))
 	if err != nil {
-		return false, fmt.Errorf("open MBIM reader: %w", err)
+		return nil, fmt.Errorf("open MBIM reader: %w", err)
 	}
 	defer func() {
 		if err := reader.Close(); err != nil {
@@ -97,10 +132,10 @@ func supportsMBIMEUICC(ctx context.Context, m *Modem) (bool, error) {
 
 	atr, err := reader.QueryUiccATR(ctx)
 	if err != nil {
-		return false, fmt.Errorf("query MBIM UICC ATR: %w", err)
+		return nil, fmt.Errorf("query MBIM UICC ATR: %w", err)
 	}
 	m.Logger().Debug("read MBIM UICC ATR", "slot", slot, "atr", formatATR(atr))
-	return atrSupportsEUICC(atr), nil
+	return slices.Clone(atr), nil
 }
 
 func formatATR(atr []byte) string {

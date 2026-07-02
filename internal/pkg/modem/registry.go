@@ -31,6 +31,7 @@ type Registry struct {
 	dbusConn   *dbus.Conn
 	dbusObject dbus.BusObject
 	modems     map[dbus.ObjectPath]*Modem
+	atrReader  atrReader
 	mu         sync.RWMutex
 	startMu    sync.Mutex
 	signalChan chan *dbus.Signal
@@ -78,7 +79,8 @@ type subscription struct {
 
 func NewRegistry() (*Registry, error) {
 	m := &Registry{
-		modems: make(map[dbus.ObjectPath]*Modem, 16),
+		modems:    make(map[dbus.ObjectPath]*Modem, 16),
+		atrReader: newATRReader(),
 	}
 	var err error
 	m.dbusConn, err = dbus.SystemBus()
@@ -190,6 +192,14 @@ func (m *Registry) createModem(ctx context.Context, objectPath dbus.ObjectPath, 
 		})
 	}
 	modem.SimSlots = simSlotPaths(data, primarySIMPath)
+	if modem.Sim != nil {
+		atr, err := m.atrReader.read(ctx, &modem)
+		if err != nil {
+			slog.Debug("read SIM ATR", "path", modem.Sim.Path, "imei", modem.EquipmentIdentifier, "error", err)
+		} else {
+			modem.Sim.ATR = atr
+		}
+	}
 	return &modem, nil
 }
 

@@ -50,6 +50,8 @@ const (
 	errorCodeUpdateESIMNicknameInvalidRequest = "update_esim_nickname_invalid_request"
 	errorCodeInvalidNickname                  = "invalid_nickname"
 	errorCodeUpdateESIMNicknameFailed         = "update_esim_nickname_failed"
+	errorCodeSERequired                       = "se_required"
+	errorCodeSENotFound                       = "se_not_found"
 )
 
 var (
@@ -111,8 +113,11 @@ func (h *Handler) Discovery(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeDiscoverESIMsFailed)
 	}
-	response, err := h.provisioning.Discovery(ctx, modem)
+	response, err := h.provisioning.Discovery(ctx, modem, c.Param("seId"))
 	if err != nil {
+		if seErr := seRequestError(c, err); seErr != nil {
+			return seErr
+		}
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
@@ -133,7 +138,7 @@ func (h *Handler) Enable(c *echo.Context) error {
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidICCID, err)
 	}
-	session, err := h.lifecycle.PrepareEnable(modem, iccid)
+	session, err := h.lifecycle.PrepareEnable(modem, c.Param("seId"), iccid)
 	if err != nil {
 		return enablePrepareError(c, err)
 	}
@@ -174,6 +179,9 @@ func enableError(c *echo.Context, err error) error {
 	if errors.Is(err, context.Canceled) {
 		return nil
 	}
+	if seErr := seRequestError(c, err); seErr != nil {
+		return seErr
+	}
 	if errors.Is(err, lpa.ErrNoSupportedAID) {
 		return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 	}
@@ -198,7 +206,10 @@ func (h *Handler) Delete(c *echo.Context) error {
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidICCID, err)
 	}
-	if err := h.lifecycle.Delete(modem, iccid); err != nil {
+	if err := h.lifecycle.Delete(modem, c.Param("seId"), iccid); err != nil {
+		if seErr := seRequestError(c, err); seErr != nil {
+			return seErr
+		}
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
@@ -265,7 +276,7 @@ func (h *Handler) Download(c *echo.Context) error {
 		},
 	}
 
-	if err := h.provisioning.Download(downloadCtx, modem, activationCode, opts); err != nil {
+	if err := h.provisioning.Download(downloadCtx, modem, start.SEID, activationCode, opts); err != nil {
 		_ = session.send(downloadServerMessage{Type: wsTypeError, Message: err.Error()})
 		return nil
 	}
@@ -290,7 +301,10 @@ func (h *Handler) UpdateNickname(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateESIMNicknameInvalidRequest); err != nil {
 		return err
 	}
-	if err := h.profile.UpdateNickname(modem, iccid, req.Nickname); err != nil {
+	if err := h.profile.UpdateNickname(modem, c.Param("seId"), iccid, req.Nickname); err != nil {
+		if seErr := seRequestError(c, err); seErr != nil {
+			return seErr
+		}
 		if errors.Is(err, errInvalidNickname) {
 			return httpapi.BadRequest(c, errorCodeInvalidNickname, err)
 		}
@@ -300,6 +314,16 @@ func (h *Handler) UpdateNickname(c *echo.Context) error {
 		return httpapi.Internal(c, errorCodeUpdateESIMNicknameFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func seRequestError(c *echo.Context, err error) error {
+	if errors.Is(err, lpa.ErrSERequired) {
+		return httpapi.BadRequest(c, errorCodeSERequired, err)
+	}
+	if errors.Is(err, lpa.ErrSENotFound) {
+		return httpapi.NotFound(c, errorCodeSENotFound, err)
+	}
+	return nil
 }
 
 func iccidFromParam(c *echo.Context) (sgp22.ICCID, error) {
@@ -324,6 +348,10 @@ func readStartMessage(conn *websocket.Conn) (downloadClientMessage, error) {
 	}
 	if start.SMDP == "" {
 		return downloadClientMessage{}, errors.New("smdp is required")
+	}
+	start.SEID = strings.TrimSpace(start.SEID)
+	if start.SEID == "" {
+		return downloadClientMessage{}, errors.New("seId is required")
 	}
 	return start, nil
 }

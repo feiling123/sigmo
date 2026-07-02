@@ -16,6 +16,7 @@ export type EsimDownloadState =
 export type EsimDownloadStage = 'initializing' | 'connecting' | 'installing' | ''
 
 type InstallPayload = {
+  seId: string
   smdp: string
   activationCode: string
   confirmationCode: string
@@ -52,6 +53,7 @@ const installingStep = 2
 const compactEsimValue = (value: string) => value.replace(/\s+/g, '')
 
 const normalizeInstallPayload = (payload: InstallPayload): InstallPayload => ({
+  seId: payload.seId.trim(),
   smdp: compactEsimValue(payload.smdp),
   activationCode: compactEsimValue(payload.activationCode),
   confirmationCode: payload.confirmationCode.trim(),
@@ -122,7 +124,7 @@ export const useEsimDownload = (modemId: Ref<string>, options?: Options) => {
   }
 
   const buildWsUrl = (id: string) => {
-    return resolveAPIWebSocketURL(`modems/${id}/esims/download-sessions`, getStoredToken())
+    return resolveAPIWebSocketURL(`modems/${id}/esim-downloads/sessions`, getStoredToken())
   }
 
   const handleServerMessage = (message: DownloadServerMessage) => {
@@ -183,6 +185,7 @@ export const useEsimDownload = (modemId: Ref<string>, options?: Options) => {
     ws.onopen = () => {
       sendMessage({
         type: 'start',
+        seId: normalizedPayload.seId,
         smdp: normalizedPayload.smdp,
         activationCode: normalizedPayload.activationCode,
         confirmationCode: normalizedPayload.confirmationCode,

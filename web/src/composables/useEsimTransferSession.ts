@@ -26,6 +26,7 @@ type TransferServerMessage = {
 }
 
 type TransferStartMessage = {
+  seId: string
   sourceType: string
   sourceId: string
   profileId: string
@@ -59,7 +60,7 @@ export const useEsimTransferSession = (handlers: Handlers) => {
   }
 
   const buildWsUrl = (id: string) => {
-    return resolveAPIWebSocketURL(`modems/${id}/esim-transfer-sessions`, getStoredToken())
+    return resolveAPIWebSocketURL(`modems/${id}/esim-transfers/sessions`, getStoredToken())
   }
 
   const start = (modemId: string, message: TransferStartMessage) => {
@@ -70,6 +71,7 @@ export const useEsimTransferSession = (handlers: Handlers) => {
       if (ws !== conn) return
       send({
         type: TRANSFER_MESSAGE.start,
+        seId: message.seId,
         sourceType: message.sourceType,
         sourceId: message.sourceId,
         profileId: message.profileId,

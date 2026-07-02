@@ -249,17 +249,23 @@ func (c *catalog) applyOverviewExtensions(ctx context.Context, device *mmodem.Mo
 
 func supportsEsim(ctx context.Context, m *mmodem.Modem, currentSettings *settings.Settings) (bool, error) {
 	supported, err := mmodem.SupportsEUICC(ctx, m)
-	if err == nil {
-		return supported, nil
+	if err != nil {
+		return false, err
+	}
+	if supported {
+		return true, nil
+	}
+	if m == nil {
+		return false, nil
 	}
 
-	m.Logger().Warn("fall back to LPA eSIM detection", "error", err)
+	m.Logger().Debug("fall back to LPA eSIM detection")
 	client, err := lpa.New(m, currentSettings)
 	if err != nil {
-		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return false, nil
+		if !errors.Is(err, lpa.ErrNoSupportedAID) {
+			m.Logger().Debug("LPA eSIM detection failed", "error", err)
 		}
-		return false, fmt.Errorf("create LPA client: %w", err)
+		return false, nil
 	}
 	if err := client.Close(); err != nil {
 		m.Logger().Warn("close LPA client after eSIM detection", "error", err)

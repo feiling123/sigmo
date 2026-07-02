@@ -40,7 +40,7 @@ func TestProfilePreviewFromIncludesOwner(t *testing.T) {
 	}
 }
 
-func TestESIMCandidateIncludesProfileDetails(t *testing.T) {
+func TestESIMOptionIncludesProfileDetails(t *testing.T) {
 	tests := []struct {
 		name string
 		info *sgp22.ProfileInfo
@@ -83,7 +83,7 @@ func TestESIMCandidateIncludesProfileDetails(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := esimCandidate(tt.info).response
+			got := esimOption(tt.info, "")
 			if got.Name != tt.want.Name {
 				t.Fatalf("Name = %q, want %q", got.Name, tt.want.Name)
 			}

@@ -1,6 +1,7 @@
 package esim
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"unicode/utf8"
@@ -21,36 +22,65 @@ func newProfile(store *settings.Store) *profile {
 	return &profile{store: store}
 }
 
-func (p *profile) List(modem *mmodem.Modem) ([]ProfileResponse, error) {
+func (p *profile) List(modem *mmodem.Modem) (*ProfilesResponse, error) {
 	current := p.store.Snapshot()
-	client, err := lpa.New(modem, &current)
+	ses, err := lpa.DiscoverSEs(modem)
 	if err != nil {
-		return nil, fmt.Errorf("create LPA client: %w", err)
+		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
 	}
-	defer func() {
+	response := &ProfilesResponse{SEs: make([]ProfileGroupResponse, 0, len(ses))}
+	for _, se := range ses {
+		group := ProfileGroupResponse{
+			ID:       se.ID,
+			Label:    se.Label,
+			AID:      hex.EncodeToString(se.AID),
+			Profiles: []ProfileResponse{},
+		}
+		client, err := lpa.NewWithAID(modem, &current, se.AID)
+		if err != nil {
+			modem.Logger().Warn("create LPA client for eSIM profiles", "seId", se.ID, "error", err)
+			return nil, fmt.Errorf("create LPA client for %s: %w", se.ID, err)
+		}
+		eid, err := client.EID()
+		if err != nil {
+			if cerr := client.Close(); cerr != nil {
+				client.Logger().Warn("close LPA client", "error", cerr)
+			}
+			err = fmt.Errorf("read EID for %s: %w", se.ID, err)
+			modem.Logger().Warn("read eUICC EID for eSIM profiles", "seId", se.ID, "error", err)
+			return nil, err
+		}
+		group.EID = hex.EncodeToString(eid)
+		profiles, err := client.ListProfile(nil, nil)
+		if err != nil {
+			if cerr := client.Close(); cerr != nil {
+				client.Logger().Warn("close LPA client", "error", cerr)
+			}
+			err = fmt.Errorf("list profiles for %s: %w", se.ID, err)
+			modem.Logger().Warn("list eSIM profiles", "seId", se.ID, "error", err)
+			return nil, err
+		}
+		for _, item := range profiles {
+			group.Profiles = append(group.Profiles, profileResponseFrom(item, se.ID, se.Label, group.EID))
+		}
 		if cerr := client.Close(); cerr != nil {
 			client.Logger().Warn("close LPA client", "error", cerr)
 		}
-	}()
-
-	profiles, err := client.ListProfile(nil, nil)
-	if err != nil {
-		return nil, fmt.Errorf("list profiles: %w", err)
-	}
-
-	response := make([]ProfileResponse, 0, len(profiles))
-	for _, item := range profiles {
-		response = append(response, profileResponseFrom(item))
+		response.SEs = append(response.SEs, group)
 	}
 	return response, nil
 }
 
-func (p *profile) UpdateNickname(modem *mmodem.Modem, iccid sgp22.ICCID, nickname string) error {
+func (p *profile) UpdateNickname(modem *mmodem.Modem, seID string, iccid sgp22.ICCID, nickname string) error {
 	if err := validateNickname(nickname); err != nil {
 		return err
 	}
 	current := p.store.Snapshot()
-	client, err := lpa.New(modem, &current)
+	se, err := lpa.ResolveSE(modem, seID)
+	if err != nil {
+		return fmt.Errorf("resolve eUICC SE: %w", err)
+	}
+	client, err := lpa.NewWithAID(modem, &current, se.AID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

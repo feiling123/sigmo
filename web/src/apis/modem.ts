@@ -81,44 +81,44 @@ export const useModemApi = () => {
 
   /**
    * Fetch Wi-Fi Calling settings
-   * GET /api/v1/modems/:id/wifi-calling-settings
+   * GET /api/v1/modems/:id/wifi-calling/settings
    */
   const getWiFiCallingSettings = (id: string) => {
-    return fetchJson<WiFiCallingSettingsResponse>(`modems/${id}/wifi-calling-settings`)
+    return fetchJson<WiFiCallingSettingsResponse>(`modems/${id}/wifi-calling/settings`)
   }
 
   /**
    * Update Wi-Fi Calling settings
-   * PUT /api/v1/modems/:id/wifi-calling-settings
+   * PUT /api/v1/modems/:id/wifi-calling/settings
    */
   const updateWiFiCallingSettings = (id: string, payload: WiFiCallingSettings) => {
-    return fetchJson<void>(`modems/${id}/wifi-calling-settings`, {
+    return fetchJson<void>(`modems/${id}/wifi-calling/settings`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     })
   }
 
   const createWiFiCallingSession = (id: string) => {
-    return fetchJson<void>(`modems/${id}/wifi-calling-sessions`, {
+    return fetchJson<void>(`modems/${id}/wifi-calling/sessions`, {
       method: 'POST',
     })
   }
 
   const deleteWiFiCallingSession = (id: string) => {
-    return fetchJson<void>(`modems/${id}/wifi-calling-sessions/current`, {
+    return fetchJson<void>(`modems/${id}/wifi-calling/sessions/current`, {
       method: 'DELETE',
     })
   }
 
   const startWiFiCallingWebsheet = (id: string) => {
-    return fetchJson<WiFiCallingWebsheetResponse>(`modems/${id}/wifi-calling-websheets`, {
+    return fetchJson<WiFiCallingWebsheetResponse>(`modems/${id}/wifi-calling/websheets`, {
       method: 'POST',
     })
   }
 
   const startWiFiCallingEmergencyAddressWebsheet = (id: string) => {
     return fetchJson<WiFiCallingEmergencyAddressWebsheetResponse>(
-      `modems/${id}/wifi-calling-emergency-address-websheets`,
+      `modems/${id}/wifi-calling/emergency-address-websheets`,
       {
         method: 'POST',
       },

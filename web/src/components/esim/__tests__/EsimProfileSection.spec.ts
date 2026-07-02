@@ -21,6 +21,8 @@ vi.mock('@/apis/esim', () => ({
 const profiles: EsimProfile[] = [
   {
     id: 'active',
+    seId: 'default',
+    seLabel: 'eUICC',
     name: 'Active',
     iccid: 'iccid-active',
     isdPAID: 'A000000559',
@@ -35,6 +37,8 @@ const profiles: EsimProfile[] = [
   },
   {
     id: 'inactive',
+    seId: 'default',
+    seLabel: 'eUICC',
     name: 'Inactive',
     iccid: 'iccid-inactive',
     enabled: false,
@@ -51,6 +55,7 @@ const stubs = {
   AlertDialog: { template: '<div><slot /></div>' },
   AlertDialogCancel: { template: '<button type="button"><slot /></button>' },
   AlertDialogContent: { template: '<div><slot /></div>' },
+  AlertDialogDescription: { template: '<p><slot /></p>' },
   AlertDialogFooter: { template: '<div><slot /></div>' },
   AlertDialogHeader: { template: '<div><slot /></div>' },
   AlertDialogTitle: { template: '<p><slot /></p>' },
@@ -62,6 +67,7 @@ const stubs = {
   },
   Dialog: { template: '<div><slot /></div>' },
   DialogContent: { template: '<div><slot /></div>' },
+  DialogDescription: { template: '<p><slot /></p>' },
   DialogFooter: { template: '<div><slot /></div>' },
   DialogHeader: { template: '<div><slot /></div>' },
   DialogTitle: { template: '<h2><slot /></h2>' },

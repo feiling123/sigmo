@@ -23,7 +23,13 @@ import SimPinUnlockDialog from '@/components/modem/SimPinUnlockDialog.vue'
 import SimSlotSwitcher from '@/components/modem/SimSlotSwitcher.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useEsimDiscover } from '@/composables/useEsimDiscover'
@@ -43,9 +49,10 @@ const canTransferEsim = computed(() => hasFeature(FEATURE.esimTransfer))
 const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
 const {
   modem,
-  euicc,
+  seInfo,
   esimProfiles,
   isLoading,
+  isSELoading,
   isEsimProfilesLoading,
   isPhysicalModem,
   isEsimModem,
@@ -53,10 +60,13 @@ const {
   fetchEsimProfiles,
 } = useModemDetail()
 
-const installDialogRef = ref<{ applyDiscoverAddress: (address: string) => void } | null>(null)
+const installDialogRef = ref<{
+  applyDiscoverAddress: (address: string, seId?: string) => void
+} | null>(null)
 
 const installDialogOpen = ref(false)
 const transferDialogOpen = ref(false)
+const transferSEID = ref('')
 const detailDialogOpen = ref(false)
 const pinUnlockDialogOpen = ref(false)
 const pinUnlockInput = ref('')
@@ -97,6 +107,9 @@ const isPreviewModalOpen = computed(() => downloadState.value === 'preview')
 const isConfirmationModalOpen = computed(() => downloadState.value === 'confirmation')
 const isResultModalOpen = computed(
   () => downloadState.value === 'completed' || downloadState.value === 'error',
+)
+const isInstallDisabled = computed(
+  () => isSELoading.value || seInfo.value === null || seInfo.value.ses.length === 0,
 )
 
 const stageLabel = computed(() => {
@@ -141,6 +154,11 @@ const confirmationPlaceholder = computed(() =>
 const refreshModem = async (targetId = modemId.value) => {
   if (!targetId || targetId === 'unknown') return
   await fetchModemDetail(targetId)
+}
+
+const openInstallDialog = () => {
+  if (isInstallDisabled.value) return
+  installDialogOpen.value = true
 }
 
 const needsPinUnlock = computed(() => {
@@ -229,8 +247,8 @@ const {
 } = useEsimDiscover({
   modemId,
   installDialogOpen,
-  applyDiscoverAddress: (address: string) => {
-    installDialogRef.value?.applyDiscoverAddress(address)
+  applyDiscoverAddress: (address: string, seId: string) => {
+    installDialogRef.value?.applyDiscoverAddress(address, seId)
   },
 })
 
@@ -301,9 +319,11 @@ const handleResultConfirm = () => {
   closeDialog()
 }
 
-const openTransferDialog = () => {
+const openTransferDialog = (seId: string) => {
   if (!canTransferEsim.value) return
+  if (!seId.trim()) return
 
+  transferSEID.value = seId.trim()
   installDialogOpen.value = false
   transferDialogOpen.value = true
 }
@@ -374,7 +394,7 @@ void fetchCapabilities()
   <!-- eSIM modem: show original layout -->
   <div v-if="modem && isEsimModem" class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
     <div class="min-w-0 space-y-3">
-      <EsimSummaryCard :modem="modem" :euicc="euicc" />
+      <EsimSummaryCard :modem="modem" :se-info="seInfo" />
       <EsimProfileSection
         v-model:profiles="esimProfiles"
         :loading="isEsimProfilesLoading"
@@ -396,23 +416,26 @@ void fetchCapabilities()
 
     <aside class="hidden xl:block">
       <div class="sticky top-(--modem-desktop-sticky-top)">
-        <ModemDetailCard :modem="modem" :euicc="euicc" />
+        <ModemDetailCard :modem="modem" :se-info="seInfo" />
       </div>
     </aside>
   </div>
 
   <!-- Physical modem: show detail card -->
   <div v-if="modem && isPhysicalModem" class="space-y-3">
-    <ModemDetailCard :modem="modem" :euicc="null" />
+    <ModemDetailCard :modem="modem" :se-info="null" />
   </div>
 
   <Dialog v-model:open="detailDialogOpen">
     <DialogContent v-if="modem && isEsimModem" class="sm:max-w-lg">
       <DialogHeader>
         <DialogTitle>{{ t('modemDetail.tabs.detail') }}</DialogTitle>
+        <DialogDescription class="sr-only">
+          {{ t('modemDetail.tabs.detail') }}
+        </DialogDescription>
       </DialogHeader>
       <ScrollArea class="pr-2 **:data-[slot=scroll-area-viewport]:max-h-[70vh]">
-        <ModemDetailCard :modem="modem" :euicc="euicc" />
+        <ModemDetailCard :modem="modem" :se-info="seInfo" />
       </ScrollArea>
     </DialogContent>
   </Dialog>
@@ -429,7 +452,8 @@ void fetchCapabilities()
     v-if="modem && isEsimModem"
     :ariaLabel="t('modemDetail.esim.installButton')"
     :title="t('modemDetail.esim.installButton')"
-    @click="installDialogOpen = true"
+    :disabled="isInstallDisabled"
+    @click="openInstallDialog"
   >
     <Download class="size-5" />
   </DraggableFab>
@@ -439,8 +463,9 @@ void fetchCapabilities()
     v-model:open="installDialogOpen"
     :is-discovering="isDiscoverLoading"
     :allow-transfer="canTransferEsim"
+    :ses="seInfo?.ses ?? []"
     @confirm="startDownload"
-    @discover="openDiscoverDialog"
+    @discover="(seId) => openDiscoverDialog(seId)"
     @transfer="openTransferDialog"
   />
 
@@ -448,6 +473,7 @@ void fetchCapabilities()
     v-if="canTransferEsim"
     v-model:open="transferDialogOpen"
     :modem-id="modemId"
+    :target-se-id="transferSEID"
     @completed="fetchEsimProfiles(modemId)"
   />
 

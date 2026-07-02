@@ -13,7 +13,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
-type Service struct {
+type Messenger struct {
 	store *storage.Store
 	route Route
 }
@@ -43,15 +43,15 @@ type realModemDevice struct {
 	modemRef *mmodem.Modem
 }
 
-func New(store *storage.Store, route Route) *Service {
-	return &Service{store: store, route: route}
+func New(store *storage.Store, route Route) *Messenger {
+	return &Messenger{store: store, route: route}
 }
 
-func (s *Service) ListConversations(ctx context.Context, modem *mmodem.Modem, query string) ([]storage.Message, error) {
+func (s *Messenger) ListConversations(ctx context.Context, modem *mmodem.Modem, query string) ([]storage.Message, error) {
 	return s.listConversations(ctx, realModemDevice{modemRef: modem}, query)
 }
 
-func (s *Service) listConversations(ctx context.Context, device modemDevice, query string) ([]storage.Message, error) {
+func (s *Messenger) listConversations(ctx context.Context, device modemDevice, query string) ([]storage.Message, error) {
 	profileID, err := device.profileID(ctx)
 	if err != nil {
 		return nil, err
@@ -62,11 +62,11 @@ func (s *Service) listConversations(ctx context.Context, device modemDevice, que
 	return s.store.ListConversations(ctx, profileID, query)
 }
 
-func (s *Service) ListByParticipant(ctx context.Context, modem *mmodem.Modem, participant string) ([]storage.Message, error) {
+func (s *Messenger) ListByParticipant(ctx context.Context, modem *mmodem.Modem, participant string) ([]storage.Message, error) {
 	return s.listByParticipant(ctx, realModemDevice{modemRef: modem}, participant)
 }
 
-func (s *Service) listByParticipant(ctx context.Context, device modemDevice, participant string) ([]storage.Message, error) {
+func (s *Messenger) listByParticipant(ctx context.Context, device modemDevice, participant string) ([]storage.Message, error) {
 	if strings.TrimSpace(participant) == "" {
 		return nil, ErrParticipantRequired
 	}
@@ -80,11 +80,11 @@ func (s *Service) listByParticipant(ctx context.Context, device modemDevice, par
 	return s.store.ListByParticipant(ctx, profileID, participant)
 }
 
-func (s *Service) DeleteByParticipant(ctx context.Context, modem *mmodem.Modem, participant string) error {
+func (s *Messenger) DeleteByParticipant(ctx context.Context, modem *mmodem.Modem, participant string) error {
 	return s.deleteByParticipant(ctx, realModemDevice{modemRef: modem}, participant)
 }
 
-func (s *Service) deleteByParticipant(ctx context.Context, device modemDevice, participant string) error {
+func (s *Messenger) deleteByParticipant(ctx context.Context, device modemDevice, participant string) error {
 	if strings.TrimSpace(participant) == "" {
 		return ErrParticipantRequired
 	}
@@ -107,11 +107,11 @@ func (s *Service) deleteByParticipant(ctx context.Context, device modemDevice, p
 	return nil
 }
 
-func (s *Service) Send(ctx context.Context, modem *mmodem.Modem, to string, text string) (string, error) {
+func (s *Messenger) Send(ctx context.Context, modem *mmodem.Modem, to string, text string) (string, error) {
 	return s.send(ctx, realModemDevice{modemRef: modem}, to, text)
 }
 
-func (s *Service) send(ctx context.Context, device modemDevice, to string, text string) (string, error) {
+func (s *Messenger) send(ctx context.Context, device modemDevice, to string, text string) (string, error) {
 	if strings.TrimSpace(to) == "" {
 		return "", ErrRecipientRequired
 	}
@@ -156,7 +156,7 @@ func (s *Service) send(ctx context.Context, device modemDevice, to string, text 
 	return to, nil
 }
 
-func (s *Service) routeStatus(ctx context.Context, modem *mmodem.Modem) (RouteStatus, error) {
+func (s *Messenger) routeStatus(ctx context.Context, modem *mmodem.Modem) (RouteStatus, error) {
 	if s.route == nil {
 		return RouteStatus{}, nil
 	}
@@ -174,7 +174,7 @@ func mapRouteSendError(to string, err error) error {
 	return fmt.Errorf("send SMS to %s over selected route: %w", to, err)
 }
 
-func (s *Service) insertSentMessage(ctx context.Context, msg storage.Message) error {
+func (s *Messenger) insertSentMessage(ctx context.Context, msg storage.Message) error {
 	inserted, err := s.store.InsertMessage(ctx, msg)
 	if err != nil {
 		return err
@@ -196,11 +196,11 @@ func (s *Service) insertSentMessage(ctx context.Context, msg storage.Message) er
 	return nil
 }
 
-func (s *Service) SyncModemMessages(ctx context.Context, modem *mmodem.Modem, profileID string) error {
+func (s *Messenger) SyncModemMessages(ctx context.Context, modem *mmodem.Modem, profileID string) error {
 	return s.syncModemMessages(ctx, realModemDevice{modemRef: modem}, profileID)
 }
 
-func (s *Service) syncModemMessages(ctx context.Context, device modemDevice, profileID string) error {
+func (s *Messenger) syncModemMessages(ctx context.Context, device modemDevice, profileID string) error {
 	messages, err := device.listSMS(ctx)
 	if err != nil {
 		return fmt.Errorf("list messages: %w", err)

@@ -28,6 +28,8 @@ const (
 	errorCodeInvalidSequenceNumber    = "invalid_sequence_number"
 	errorCodeResendNotificationFailed = "resend_notification_failed"
 	errorCodeDeleteNotificationFailed = "delete_notification_failed"
+	errorCodeSERequired               = "se_required"
+	errorCodeSENotFound               = "se_not_found"
 )
 
 var (
@@ -69,7 +71,10 @@ func (h *Handler) Resend(c *echo.Context) error {
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidSequenceNumber, err)
 	}
-	if err := h.notifications.Resend(modem, sequence); err != nil {
+	if err := h.notifications.Resend(modem, c.Param("seId"), sequence); err != nil {
+		if seErr := seRequestError(c, err); seErr != nil {
+			return seErr
+		}
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
@@ -90,13 +95,26 @@ func (h *Handler) Delete(c *echo.Context) error {
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidSequenceNumber, err)
 	}
-	if err := h.notifications.Delete(modem, sequence); err != nil {
+	if err := h.notifications.Delete(modem, c.Param("seId"), sequence); err != nil {
+		if seErr := seRequestError(c, err); seErr != nil {
+			return seErr
+		}
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
 		return httpapi.Internal(c, errorCodeDeleteNotificationFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func seRequestError(c *echo.Context, err error) error {
+	if errors.Is(err, lpa.ErrSERequired) {
+		return httpapi.BadRequest(c, errorCodeSERequired, err)
+	}
+	if errors.Is(err, lpa.ErrSENotFound) {
+		return httpapi.NotFound(c, errorCodeSENotFound, err)
+	}
+	return nil
 }
 
 func sequenceFromParam(c *echo.Context) (sgp22.SequenceNumber, error) {

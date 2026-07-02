@@ -1,6 +1,9 @@
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
 export type EsimProfileApiResponse = {
+  seId: string
+  seLabel: string
+  seEid?: string
   name: string
   serviceProviderName: string
   iccid: string
@@ -15,7 +18,17 @@ export type EsimProfileApiResponse = {
   regionCode?: string
 }
 
-export type EsimProfilesResponse = EsimProfileApiResponse[]
+export type EsimProfileGroup = {
+  id: string
+  label: string
+  aid?: string
+  eid?: string
+  profiles: EsimProfileApiResponse[]
+}
+
+export type EsimProfilesResponse = {
+  ses: EsimProfileGroup[]
+}
 
 export type EsimDiscoverItem = {
   eventId: string
@@ -44,6 +57,9 @@ export type EsimProfileOwner = {
 
 export type EsimProfile = {
   id: string
+  seId: string
+  seLabel: string
+  seEid?: string
   name: string
   iccid: string
   isdPAID?: string
@@ -73,6 +89,7 @@ export type EsimTransferSourcesResponse = {
 
 export type EsimTransferProfile = {
   id: string
+  seId?: string
   type: 'esim' | 'physical'
   name: string
   serviceProviderName?: string

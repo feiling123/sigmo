@@ -19,9 +19,13 @@ func newProvisioning(store *settings.Store) *provisioning {
 	return &provisioning{store: store}
 }
 
-func (p *provisioning) Discovery(ctx context.Context, modem *mmodem.Modem) ([]DiscoverResponse, error) {
+func (p *provisioning) Discovery(ctx context.Context, modem *mmodem.Modem, seID string) ([]DiscoverResponse, error) {
 	current := p.store.Snapshot()
-	client, err := lpa.New(modem, &current)
+	se, err := lpa.ResolveSE(modem, seID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve eUICC SE: %w", err)
+	}
+	client, err := lpa.NewWithAID(modem, &current, se.AID)
 	if err != nil {
 		return nil, fmt.Errorf("create LPA client: %w", err)
 	}

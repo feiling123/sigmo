@@ -1,6 +1,21 @@
 package esim
 
+type ProfilesResponse struct {
+	SEs []ProfileGroupResponse `json:"ses"`
+}
+
+type ProfileGroupResponse struct {
+	ID       string            `json:"id"`
+	Label    string            `json:"label"`
+	AID      string            `json:"aid,omitempty"`
+	EID      string            `json:"eid,omitempty"`
+	Profiles []ProfileResponse `json:"profiles"`
+}
+
 type ProfileResponse struct {
+	SEID                string               `json:"seId"`
+	SELabel             string               `json:"seLabel"`
+	EID                 string               `json:"seEid,omitempty"`
 	Name                string               `json:"name"`
 	ServiceProviderName string               `json:"serviceProviderName"`
 	ICCID               string               `json:"iccid"`
@@ -33,6 +48,7 @@ type UpdateNicknameRequest struct {
 
 type downloadClientMessage struct {
 	Type             string `json:"type"`
+	SEID             string `json:"seId,omitempty"`
 	SMDP             string `json:"smdp,omitempty"`
 	ActivationCode   string `json:"activationCode,omitempty"`
 	ConfirmationCode string `json:"confirmationCode,omitempty"`

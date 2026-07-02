@@ -35,7 +35,7 @@ const (
 )
 
 type Media struct {
-	calls *Service
+	calls *Calls
 
 	amrMu      sync.Mutex
 	amrFactory *voicecodec.AMRCodecFactory
@@ -51,7 +51,7 @@ type WebRTCSession struct {
 	bridge *webRTCBridge
 }
 
-func NewMedia(calls *Service) *Media {
+func NewMedia(calls *Calls) *Media {
 	return &Media{
 		calls:   calls,
 		ice:     newWebRTCICEProvider(),

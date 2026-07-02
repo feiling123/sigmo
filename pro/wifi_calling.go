@@ -125,7 +125,7 @@ func (r ussdRoute) ExecuteUSSD(ctx context.Context, modem *mmodem.Modem, action 
 
 func forwardCalls(ctx context.Context, relay interface {
 	ForwardCall(context.Context, storage.Call) error
-}, calls *procall.Service) error {
+}, calls *procall.Calls) error {
 	events, unsubscribe := calls.Subscribe(16)
 	defer unsubscribe()
 

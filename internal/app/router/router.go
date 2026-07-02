@@ -9,6 +9,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/app/forwarder"
+	"github.com/damonto/sigmo/internal/app/handler/appinfo"
 	hauth "github.com/damonto/sigmo/internal/app/handler/auth"
 	"github.com/damonto/sigmo/internal/app/handler/capability"
 	"github.com/damonto/sigmo/internal/app/handler/esim"
@@ -34,6 +35,7 @@ import (
 type Extension func(*echo.Group, RegisterConfig) error
 
 type RegisterConfig struct {
+	BuildVersion       string
 	Store              *settings.Store
 	Registry           *modem.Registry
 	Internet           *pinternet.Connector
@@ -59,6 +61,9 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 	}))
 
 	v1 := e.Group("/api/v1")
+
+	appInfoHandler := appinfo.New(deps.BuildVersion)
+	v1.GET("/app", appInfoHandler.Get)
 
 	capabilityHandler := capability.New(deps.Features)
 	v1.GET("/capabilities", capabilityHandler.List)
@@ -122,7 +127,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 
 		{
 			h := euicc.New(deps.Store, deps.Registry)
-			protected.GET("/modems/:id/euicc", h.Get)
+			protected.GET("/modems/:id/ses", h.Get)
 		}
 
 		{
@@ -132,18 +137,18 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 				Internet: deps.Internet,
 			})
 			protected.GET("/modems/:id/esims", h.List)
-			protected.POST("/modems/:id/esim-discoveries", h.Discovery)
-			protected.GET("/modems/:id/esims/download-sessions", h.Download)
-			protected.PUT("/modems/:id/esims/:iccid/activation", h.Enable)
-			protected.PUT("/modems/:id/esims/:iccid/nickname", h.UpdateNickname)
-			protected.DELETE("/modems/:id/esims/:iccid", h.Delete)
+			protected.POST("/modems/:id/ses/:seId/esim-discoveries", h.Discovery)
+			protected.GET("/modems/:id/esim-downloads/sessions", h.Download)
+			protected.PUT("/modems/:id/ses/:seId/esims/:iccid/activation", h.Enable)
+			protected.PUT("/modems/:id/ses/:seId/esims/:iccid/nickname", h.UpdateNickname)
+			protected.DELETE("/modems/:id/ses/:seId/esims/:iccid", h.Delete)
 		}
 
 		{
 			h := notification.New(deps.Store, deps.Registry)
 			protected.GET("/modems/:id/notifications", h.List)
-			protected.POST("/modems/:id/notifications/:sequence/deliveries", h.Resend)
-			protected.DELETE("/modems/:id/notifications/:sequence", h.Delete)
+			protected.POST("/modems/:id/ses/:seId/notifications/:sequence/deliveries", h.Resend)
+			protected.DELETE("/modems/:id/ses/:seId/notifications/:sequence", h.Delete)
 		}
 
 		for _, extension := range deps.Extensions {

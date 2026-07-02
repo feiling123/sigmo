@@ -7,7 +7,7 @@ const getWebRTCICEServers = vi.hoisted(() => vi.fn())
 
 vi.mock('@/apis/call', () => ({
   buildWebRTCSessionUrl: (id: string, callID: string) =>
-    `ws://localhost/api/v1/modems/${id}/calls/${encodeURIComponent(callID)}/webrtc-sessions`,
+    `ws://localhost/api/v1/modems/${id}/calls/${encodeURIComponent(callID)}/webrtc/sessions`,
   useCallApi: () => ({
     getWebRTCICEServers,
   }),
@@ -206,7 +206,7 @@ describe('call audio session', () => {
     })
     expect(pc.addTrack).toHaveBeenCalledWith(track, stream)
     expect(FakeWebSocket.instances[0]?.url).toBe(
-      'ws://localhost/api/v1/modems/modem-1/calls/call-1/webrtc-sessions',
+      'ws://localhost/api/v1/modems/modem-1/calls/call-1/webrtc/sessions',
     )
     expect(FakeWebSocket.instances[0]?.sent).toContainEqual({
       type: 'offer',
@@ -299,7 +299,7 @@ describe('call audio session', () => {
 
     await expect(session.start('call-1')).resolves.toBe(true)
     expect(FakeWebSocket.instances[0]?.url).toBe(
-      'ws://localhost/api/v1/modems/modem-1/calls/call-1/webrtc-sessions',
+      'ws://localhost/api/v1/modems/modem-1/calls/call-1/webrtc/sessions',
     )
     FakeWebSocket.instances[0]?.message({
       type: 'candidate',

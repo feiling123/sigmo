@@ -24,6 +24,7 @@ type SIM struct {
 	Path               dbus.ObjectPath
 	Active             bool
 	Identifier         string
+	ATR                []byte
 	Eid                string
 	Imsi               string
 	OperatorIdentifier string

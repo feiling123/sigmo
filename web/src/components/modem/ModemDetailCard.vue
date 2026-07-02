@@ -3,12 +3,12 @@ import { computed } from 'vue'
 
 import RegionFlag from '@/components/RegionFlag.vue'
 import { Badge } from '@/components/ui/badge'
-import type { EuiccApiResponse } from '@/types/euicc'
+import type { SEsResponse } from '@/types/se'
 import type { Modem } from '@/types/modem'
 
 const props = defineProps<{
   modem: Modem
-  euicc?: EuiccApiResponse | null
+  seInfo?: SEsResponse | null
 }>()
 
 const formatBytes = (bytes?: number) => {
@@ -20,11 +20,12 @@ const formatBytes = (bytes?: number) => {
   return `${Math.round((bytes / Math.pow(k, i)) * 100) / 100} ${sizes[i]}`
 }
 
-const storageRemaining = computed(() => formatBytes(props.euicc?.freeSpace))
-const eid = computed(() => props.euicc?.eid || 'N/A')
-const sasUpName = computed(() => props.euicc?.sasUp?.name || 'N/A')
-const sasUpRegion = computed(() => props.euicc?.sasUp?.region ?? '')
-const certificates = computed(() => props.euicc?.certificates ?? [])
+const primarySE = computed(() => props.seInfo?.ses[0])
+const storageRemaining = computed(() => formatBytes(primarySE.value?.freeSpace))
+const eid = computed(() => primarySE.value?.eid || 'N/A')
+const sasUpName = computed(() => primarySE.value?.sasUp?.name || 'N/A')
+const sasUpRegion = computed(() => primarySE.value?.sasUp?.region ?? '')
+const certificates = computed(() => primarySE.value?.certificates ?? [])
 </script>
 
 <template>

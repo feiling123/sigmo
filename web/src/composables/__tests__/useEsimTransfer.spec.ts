@@ -73,7 +73,7 @@ describe('useEsimTransfer', () => {
       supported: true,
     }
 
-    transfer.startTransfer()
+    transfer.startTransfer('default')
     const ws = FakeWebSocket.instances[0]
     expect(ws).toBeDefined()
     if (!ws) return
@@ -126,7 +126,7 @@ describe('useEsimTransfer', () => {
     expect(transfer.sourceImei.value).toBe('target-imei')
     expect(transfer.canStartTransfer.value).toBe(true)
 
-    transfer.startTransfer()
+    transfer.startTransfer('default')
     const ws = FakeWebSocket.instances[0]
     expect(ws).toBeDefined()
     if (!ws) return
@@ -159,7 +159,7 @@ describe('useEsimTransfer', () => {
       supported: true,
     }
 
-    transfer.startTransfer()
+    transfer.startTransfer('default')
     const ws = FakeWebSocket.instances[0]
     expect(ws).toBeDefined()
     if (!ws) return
@@ -187,7 +187,7 @@ describe('useEsimTransfer', () => {
       supported: true,
     }
 
-    transfer.startTransfer()
+    transfer.startTransfer('default')
     const ws = FakeWebSocket.instances[0]
     expect(ws).toBeDefined()
     if (!ws) return
@@ -227,7 +227,7 @@ describe('useEsimTransfer', () => {
       supported: true,
     }
 
-    transfer.startTransfer()
+    transfer.startTransfer('default')
     const ws = FakeWebSocket.instances[0]
     expect(ws).toBeDefined()
     if (!ws) return

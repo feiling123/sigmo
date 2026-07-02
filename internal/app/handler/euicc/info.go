@@ -1,7 +1,7 @@
 package euicc
 
 import (
-	"errors"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/damonto/sigmo/internal/pkg/lpa"
@@ -19,32 +19,44 @@ func newEUICC(store *settings.Store) *euicc {
 	}
 }
 
-func (e *euicc) Get(modem *mmodem.Modem) (*EuiccResponse, error) {
+func (e *euicc) Get(modem *mmodem.Modem) (*SEsResponse, error) {
 	current := e.store.Snapshot()
-	client, err := lpa.New(modem, &current)
+	ses, err := lpa.DiscoverSEs(modem)
 	if err != nil {
-		if errors.Is(err, lpa.ErrNoSupportedAID) {
+		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
+	}
+	response := &SEsResponse{SEs: make([]SEItemResponse, 0, len(ses))}
+	for _, se := range ses {
+		item := SEItemResponse{
+			ID:    se.ID,
+			Label: se.Label,
+			AID:   hex.EncodeToString(se.AID),
+		}
+		client, err := lpa.NewWithAID(modem, &current, se.AID)
+		if err != nil {
+			modem.Logger().Warn("create LPA client for eUICC info", "seId", se.ID, "error", err)
+			return nil, fmt.Errorf("create LPA client for %s: %w", se.ID, err)
+		}
+		info, err := client.Info()
+		if err != nil {
+			if cerr := client.Close(); cerr != nil {
+				client.Logger().Warn("failed to close LPA client", "error", cerr)
+			}
+			err = fmt.Errorf("fetch eUICC info for %s: %w", se.ID, err)
+			modem.Logger().Warn("fetch eUICC info", "seId", se.ID, "error", err)
 			return nil, err
 		}
-		return nil, fmt.Errorf("create LPA client: %w", err)
-	}
-	defer func() {
+		item.EID = info.EID
+		item.FreeSpace = info.FreeSpace
+		item.SASUP = SASUPResponse{
+			Name:   info.SASUP.Name,
+			Region: info.SASUP.Region,
+		}
+		item.Certificates = info.Certificates
 		if cerr := client.Close(); cerr != nil {
 			client.Logger().Warn("failed to close LPA client", "error", cerr)
 		}
-	}()
-
-	info, err := client.Info()
-	if err != nil {
-		return nil, fmt.Errorf("fetch eUICC info: %w", err)
+		response.SEs = append(response.SEs, item)
 	}
-	return &EuiccResponse{
-		EID:       info.EID,
-		FreeSpace: info.FreeSpace,
-		SASUP: SASUPResponse{
-			Name:   info.SASUP.Name,
-			Region: info.SASUP.Region,
-		},
-		Certificates: info.Certificates,
-	}, nil
+	return response, nil
 }

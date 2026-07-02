@@ -26,12 +26,13 @@ func init() {
 
 func main() {
 	flag.Parse()
+	version := buildVersion()
 	if showVersion {
-		fmt.Println(BuildVersion)
+		fmt.Println(version)
 		return
 	}
 	if err := server.Run(server.Config{
-		BuildVersion:  BuildVersion,
+		BuildVersion:  version,
 		ListenAddress: listenAddress,
 		DBPath:        dbPath,
 		Debug:         debug,
@@ -39,4 +40,11 @@ func main() {
 		slog.Error("run server", "error", err)
 		os.Exit(1)
 	}
+}
+
+func buildVersion() string {
+	if BuildVersion == "" {
+		return "dev"
+	}
+	return BuildVersion
 }

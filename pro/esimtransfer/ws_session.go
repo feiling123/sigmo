@@ -21,37 +21,37 @@ const (
 	wsTypeError          = "error"
 )
 
-type session struct {
+type wsSession struct {
 	conn           *websocket.Conn
 	disconnectCh   chan struct{}
 	disconnectOnce sync.Once
-	startCh        chan clientMessage
-	inputCh        chan clientMessage
-	deleteCh       chan clientMessage
+	startCh        chan wsClientMessage
+	inputCh        chan wsClientMessage
+	deleteCh       chan wsClientMessage
 }
 
-func newSession(conn *websocket.Conn, cancel context.CancelFunc) *session {
-	session := &session{
+func newWSSession(conn *websocket.Conn, cancel context.CancelFunc) *wsSession {
+	session := &wsSession{
 		conn:         conn,
 		disconnectCh: make(chan struct{}),
-		startCh:      make(chan clientMessage, 1),
-		inputCh:      make(chan clientMessage, 1),
-		deleteCh:     make(chan clientMessage, 1),
+		startCh:      make(chan wsClientMessage, 1),
+		inputCh:      make(chan wsClientMessage, 1),
+		deleteCh:     make(chan wsClientMessage, 1),
 	}
 	go session.readLoop(cancel)
 	return session
 }
 
-func (s *session) disconnect() {
+func (s *wsSession) disconnect() {
 	s.disconnectOnce.Do(func() {
 		close(s.disconnectCh)
 	})
 }
 
-func (s *session) readLoop(cancel context.CancelFunc) {
+func (s *wsSession) readLoop(cancel context.CancelFunc) {
 	defer s.disconnect()
 	for {
-		var msg clientMessage
+		var msg wsClientMessage
 		if err := s.conn.ReadJSON(&msg); err != nil {
 			return
 		}
@@ -68,7 +68,7 @@ func (s *session) readLoop(cancel context.CancelFunc) {
 	}
 }
 
-func sendLatest(ch chan clientMessage, msg clientMessage) {
+func sendLatest(ch chan wsClientMessage, msg wsClientMessage) {
 	select {
 	case ch <- msg:
 	default:
@@ -80,7 +80,7 @@ func sendLatest(ch chan clientMessage, msg clientMessage) {
 	}
 }
 
-func (s *session) send(msg serverMessage) error {
+func (s *wsSession) send(msg wsServerMessage) error {
 	if err := s.conn.WriteJSON(msg); err != nil {
 		s.disconnect()
 		return err
@@ -88,7 +88,7 @@ func (s *session) send(msg serverMessage) error {
 	return nil
 }
 
-func (s *session) sendIfConnected(msg serverMessage) {
+func (s *wsSession) sendIfConnected(msg wsServerMessage) {
 	select {
 	case <-s.disconnectCh:
 		return
@@ -97,35 +97,35 @@ func (s *session) sendIfConnected(msg serverMessage) {
 	_ = s.send(msg)
 }
 
-func (s *session) waitForStart(ctx context.Context) (clientMessage, bool) {
+func (s *wsSession) waitForStart(ctx context.Context) (wsClientMessage, bool) {
 	select {
 	case msg := <-s.startCh:
 		return msg, true
 	case <-ctx.Done():
-		return clientMessage{}, false
+		return wsClientMessage{}, false
 	case <-s.disconnectCh:
-		return clientMessage{}, false
+		return wsClientMessage{}, false
 	}
 }
 
-func (s *session) waitForUserInput(ctx context.Context) (clientMessage, bool) {
+func (s *wsSession) waitForUserInput(ctx context.Context) (wsClientMessage, bool) {
 	select {
 	case msg := <-s.inputCh:
 		return msg, true
 	case <-ctx.Done():
-		return clientMessage{}, false
+		return wsClientMessage{}, false
 	case <-s.disconnectCh:
-		return clientMessage{}, false
+		return wsClientMessage{}, false
 	}
 }
 
-func (s *session) waitForSourceDeletion(ctx context.Context) (clientMessage, bool) {
+func (s *wsSession) waitForSourceDeletion(ctx context.Context) (wsClientMessage, bool) {
 	select {
 	case msg := <-s.deleteCh:
 		return msg, true
 	case <-ctx.Done():
-		return clientMessage{}, false
+		return wsClientMessage{}, false
 	case <-s.disconnectCh:
-		return clientMessage{}, false
+		return wsClientMessage{}, false
 	}
 }

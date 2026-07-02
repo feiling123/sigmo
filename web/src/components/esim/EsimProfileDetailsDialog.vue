@@ -3,7 +3,13 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import EsimProfileAvatar from '@/components/esim/EsimProfileAvatar.vue'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import type { EsimProfile } from '@/types/esim'
 
 const props = defineProps<{
@@ -62,12 +68,14 @@ const focusDialogTitle = (event: Event) => {
   <Dialog v-model:open="open">
     <DialogContent
       class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
-      :aria-describedby="undefined"
       @open-auto-focus="focusDialogTitle"
     >
       <DialogHeader>
         <div ref="focusTarget" tabindex="-1" class="space-y-1 outline-none">
           <DialogTitle>{{ t('modemDetail.esim.profileDetailsTitle') }}</DialogTitle>
+          <DialogDescription class="sr-only">
+            {{ t('modemDetail.esim.profileDetailsTitle') }}
+          </DialogDescription>
         </div>
       </DialogHeader>
 

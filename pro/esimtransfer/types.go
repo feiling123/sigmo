@@ -34,8 +34,8 @@ var (
 type Config struct {
 	Store         *settings.Store
 	Registry      *mmodem.Registry
-	EnableProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
-	DeleteProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
+	EnableProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
+	DeleteProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
 	Websheets     *websheet.Broker
 }
 
@@ -60,6 +60,7 @@ type ProfilesRequest struct {
 
 type ProfileResponse struct {
 	ID                  string               `json:"id"`
+	SEID                string               `json:"seId,omitempty"`
 	Type                ProfileType          `json:"type"`
 	Name                string               `json:"name"`
 	ServiceProviderName string               `json:"serviceProviderName,omitempty"`
@@ -83,43 +84,4 @@ type ProfileOwnerResponse struct {
 	MNC  string `json:"mnc"`
 	GID1 string `json:"gid1,omitempty"`
 	GID2 string `json:"gid2,omitempty"`
-}
-
-type clientMessage struct {
-	Type       string     `json:"type"`
-	SourceType SourceType `json:"sourceType,omitempty"`
-	SourceID   string     `json:"sourceId,omitempty"`
-	ProfileID  string     `json:"profileId,omitempty"`
-	SourceIMEI string     `json:"sourceImei,omitempty"`
-	Accept     *bool      `json:"accept,omitempty"`
-	Response   string     `json:"response,omitempty"`
-}
-
-type serverMessage struct {
-	Type     string                  `json:"type"`
-	Stage    string                  `json:"stage,omitempty"`
-	Message  string                  `json:"message,omitempty"`
-	ICCID    string                  `json:"iccid,omitempty"`
-	Input    *userInputMessage       `json:"input,omitempty"`
-	Profile  *downloadProfilePreview `json:"profile,omitempty"`
-	Websheet *websheet.Info          `json:"websheet,omitempty"`
-}
-
-type userInputMessage struct {
-	Text         string `json:"text"`
-	AcceptLabel  string `json:"acceptLabel,omitempty"`
-	RejectLabel  string `json:"rejectLabel,omitempty"`
-	FreeText     bool   `json:"freeText"`
-	FreeTextHint string `json:"freeTextHint,omitempty"`
-}
-
-type downloadProfilePreview struct {
-	ICCID               string               `json:"iccid"`
-	ServiceProviderName string               `json:"serviceProviderName"`
-	ProfileName         string               `json:"profileName"`
-	ProfileNickname     string               `json:"profileNickname,omitempty"`
-	ProfileState        string               `json:"profileState"`
-	ProfileOwner        ProfileOwnerResponse `json:"profileOwner"`
-	Icon                string               `json:"icon,omitempty"`
-	RegionCode          string               `json:"regionCode,omitempty"`
 }

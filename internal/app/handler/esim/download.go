@@ -10,9 +10,13 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-func (p *provisioning) Download(ctx context.Context, modem *mmodem.Modem, activationCode *elpa.ActivationCode, opts *elpa.DownloadOptions) error {
+func (p *provisioning) Download(ctx context.Context, modem *mmodem.Modem, seID string, activationCode *elpa.ActivationCode, opts *elpa.DownloadOptions) error {
 	current := p.store.Snapshot()
-	client, err := lpa.New(modem, &current)
+	se, err := lpa.ResolveSE(modem, seID)
+	if err != nil {
+		return fmt.Errorf("resolve eUICC SE: %w", err)
+	}
+	client, err := lpa.NewWithAID(modem, &current, se.AID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

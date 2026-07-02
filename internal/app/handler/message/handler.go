@@ -16,7 +16,7 @@ import (
 
 type Handler struct {
 	registry *mmodem.Registry
-	messages *pmessage.Service
+	messages *pmessage.Messenger
 }
 
 const (

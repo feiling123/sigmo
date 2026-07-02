@@ -40,9 +40,9 @@ func TestDeleteSessionRouteDisconnectsCurrentSession(t *testing.T) {
 		},
 		wifiCalling: wifiCalling,
 	}
-	e.DELETE("/modems/:id/wifi-calling-sessions/current", h.DeleteSession)
+	e.DELETE("/modems/:id/wifi-calling/sessions/current", h.DeleteSession)
 
-	req := httptest.NewRequest(http.MethodDelete, "/modems/modem-1/wifi-calling-sessions/current", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/modems/modem-1/wifi-calling/sessions/current", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -56,7 +56,7 @@ func TestDeleteSessionRouteDisconnectsCurrentSession(t *testing.T) {
 		t.Fatal("session was not removed")
 	}
 
-	req = httptest.NewRequest(http.MethodDelete, "/modems/modem-1/wifi-calling-sessions/current", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/modems/modem-1/wifi-calling/sessions/current", nil)
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {

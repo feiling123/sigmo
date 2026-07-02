@@ -31,8 +31,11 @@ func profileIconDataURL(icon sgp22.ProfileIcon) string {
 	return fmt.Sprintf("data:%s;base64,%s", fileType, base64.StdEncoding.EncodeToString(icon))
 }
 
-func profileResponseFrom(info *sgp22.ProfileInfo) ProfileResponse {
+func profileResponseFrom(info *sgp22.ProfileInfo, seID, seLabel, seEID string) ProfileResponse {
 	return ProfileResponse{
+		SEID:                seID,
+		SELabel:             seLabel,
+		EID:                 seEID,
 		Name:                profileDisplayName(info),
 		ServiceProviderName: info.ServiceProviderName,
 		ICCID:               info.ICCID.String(),

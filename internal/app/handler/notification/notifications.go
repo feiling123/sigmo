@@ -1,6 +1,7 @@
 package notification
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strconv"
 
@@ -18,36 +19,70 @@ func newNotification(store *settings.Store) *notification {
 	return &notification{store: store}
 }
 
-func (n *notification) List(modem *mmodem.Modem) ([]NotificationResponse, error) {
+func (n *notification) List(modem *mmodem.Modem) (*NotificationsResponse, error) {
 	current := n.store.Snapshot()
-	client, err := lpa.New(modem, &current)
+	ses, err := lpa.DiscoverSEs(modem)
 	if err != nil {
-		return nil, fmt.Errorf("create LPA client: %w", err)
+		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
 	}
-	defer func() {
+	response := &NotificationsResponse{SEs: make([]NotificationGroupResponse, 0, len(ses))}
+	for _, se := range ses {
+		group := NotificationGroupResponse{
+			ID:            se.ID,
+			Label:         se.Label,
+			AID:           hex.EncodeToString(se.AID),
+			Notifications: []NotificationResponse{},
+		}
+		client, err := lpa.NewWithAID(modem, &current, se.AID)
+		if err != nil {
+			modem.Logger().Warn("create LPA client for notifications", "seId", se.ID, "error", err)
+			return nil, fmt.Errorf("create LPA client for %s: %w", se.ID, err)
+		}
+		eid, err := client.EID()
+		if err != nil {
+			if cerr := client.Close(); cerr != nil {
+				client.Logger().Warn("failed to close LPA client", "error", cerr)
+			}
+			err = fmt.Errorf("read EID for %s: %w", se.ID, err)
+			modem.Logger().Warn("read eUICC EID for notifications", "seId", se.ID, "error", err)
+			return nil, err
+		}
+		group.EID = hex.EncodeToString(eid)
+		notifications, err := client.ListNotification()
+		if err != nil {
+			if cerr := client.Close(); cerr != nil {
+				client.Logger().Warn("failed to close LPA client", "error", cerr)
+			}
+			err = fmt.Errorf("list notifications for %s: %w", se.ID, err)
+			modem.Logger().Warn("list notifications", "seId", se.ID, "error", err)
+			return nil, err
+		}
+		for _, notification := range notifications {
+			group.Notifications = append(group.Notifications, NotificationResponse{
+				SEID:           se.ID,
+				SELabel:        se.Label,
+				EID:            group.EID,
+				SequenceNumber: strconv.FormatUint(uint64(notification.SequenceNumber), 10),
+				ICCID:          notification.ICCID.String(),
+				SMDP:           notification.Address,
+				Operation:      operationLabel(notification.ProfileManagementOperation),
+			})
+		}
 		if cerr := client.Close(); cerr != nil {
 			client.Logger().Warn("failed to close LPA client", "error", cerr)
 		}
-	}()
-	notifications, err := client.ListNotification()
-	if err != nil {
-		return nil, fmt.Errorf("list notifications: %w", err)
-	}
-	response := make([]NotificationResponse, 0, len(notifications))
-	for _, notification := range notifications {
-		response = append(response, NotificationResponse{
-			SequenceNumber: strconv.FormatUint(uint64(notification.SequenceNumber), 10),
-			ICCID:          notification.ICCID.String(),
-			SMDP:           notification.Address,
-			Operation:      operationLabel(notification.ProfileManagementOperation),
-		})
+		response.SEs = append(response.SEs, group)
 	}
 	return response, nil
 }
 
-func (n *notification) Resend(modem *mmodem.Modem, sequence sgp22.SequenceNumber) error {
+func (n *notification) Resend(modem *mmodem.Modem, seID string, sequence sgp22.SequenceNumber) error {
 	current := n.store.Snapshot()
-	client, err := lpa.New(modem, &current)
+	se, err := lpa.ResolveSE(modem, seID)
+	if err != nil {
+		return fmt.Errorf("resolve eUICC SE: %w", err)
+	}
+	client, err := lpa.NewWithAID(modem, &current, se.AID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}
@@ -62,9 +97,13 @@ func (n *notification) Resend(modem *mmodem.Modem, sequence sgp22.SequenceNumber
 	return nil
 }
 
-func (n *notification) Delete(modem *mmodem.Modem, sequence sgp22.SequenceNumber) error {
+func (n *notification) Delete(modem *mmodem.Modem, seID string, sequence sgp22.SequenceNumber) error {
 	current := n.store.Snapshot()
-	client, err := lpa.New(modem, &current)
+	se, err := lpa.ResolveSE(modem, seID)
+	if err != nil {
+		return fmt.Errorf("resolve eUICC SE: %w", err)
+	}
+	client, err := lpa.NewWithAID(modem, &current, se.AID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

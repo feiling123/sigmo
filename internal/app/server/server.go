@@ -133,6 +133,7 @@ func Run(cfg Config) error {
 		}
 	}
 	if err := router.Register(server, router.RegisterConfig{
+		BuildVersion:       cfg.BuildVersion,
 		Store:              store,
 		Registry:           registry,
 		Internet:           internetConnector,

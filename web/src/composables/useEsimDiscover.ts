@@ -6,7 +6,7 @@ import type { EsimDiscoverItem } from '@/types/esim'
 type Options = {
   modemId: ComputedRef<string> | Ref<string>
   installDialogOpen: Ref<boolean>
-  applyDiscoverAddress: (address: string) => void
+  applyDiscoverAddress: (address: string, seId: string) => void
 }
 
 export const useEsimDiscover = ({ modemId, installDialogOpen, applyDiscoverAddress }: Options) => {
@@ -17,6 +17,7 @@ export const useEsimDiscover = ({ modemId, installDialogOpen, applyDiscoverAddre
   const selectedDiscoverAddress = ref('')
   const isDiscoverLoading = ref(false)
   const restoreInstallDialog = ref(false)
+  const discoverSEID = ref('')
 
   const hasDiscoverOptions = computed(() => discoverOptions.value.length > 0)
   const hasDiscoverSelection = computed(() => selectedDiscoverAddress.value.trim().length > 0)
@@ -26,17 +27,19 @@ export const useEsimDiscover = ({ modemId, installDialogOpen, applyDiscoverAddre
     selectedDiscoverAddress.value = ''
   }
 
-  const openDiscoverDialog = async () => {
+  const openDiscoverDialog = async (seId: string) => {
     const targetId = modemId.value
     if (!targetId || targetId === 'unknown') return
+    if (!seId.trim()) return
     if (isDiscoverLoading.value) return
     restoreInstallDialog.value = true
     installDialogOpen.value = false
     discoverDialogOpen.value = true
     resetDiscoverState()
+    discoverSEID.value = seId
     isDiscoverLoading.value = true
     try {
-      const { data } = await esimApi.discoverEsims(targetId)
+      const { data } = await esimApi.discoverEsims(targetId, seId)
       if (!discoverDialogOpen.value) return
       discoverOptions.value = data.value ?? []
     } catch {
@@ -50,7 +53,7 @@ export const useEsimDiscover = ({ modemId, installDialogOpen, applyDiscoverAddre
     const address = selectedDiscoverAddress.value.trim()
     if (!address) return
     restoreInstallDialog.value = false
-    applyDiscoverAddress(address)
+    applyDiscoverAddress(address, discoverSEID.value)
     discoverDialogOpen.value = false
   }
 
@@ -61,6 +64,7 @@ export const useEsimDiscover = ({ modemId, installDialogOpen, applyDiscoverAddre
         installDialogOpen.value = true
         restoreInstallDialog.value = false
       }
+      discoverSEID.value = ''
     }
   })
 
@@ -70,6 +74,7 @@ export const useEsimDiscover = ({ modemId, installDialogOpen, applyDiscoverAddre
       if (id && id !== 'unknown') return
       discoverDialogOpen.value = false
       restoreInstallDialog.value = false
+      discoverSEID.value = ''
       resetDiscoverState()
     },
     { immediate: true },

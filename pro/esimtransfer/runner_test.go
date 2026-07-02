@@ -26,27 +26,27 @@ var testWSUpgrader = websocket.Upgrader{
 	},
 }
 
-func TestCandidateSupport(t *testing.T) {
+func TestSourceProfileSupport(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		candidate profileCandidate
-		wantOK    bool
+		name   string
+		option ProfileResponse
+		wantOK bool
 	}{
 		{
-			name:      "enabled esim with entitlement",
-			candidate: esimCandidate(testProfile(sgp22.ProfileEnabled)),
-			wantOK:    true,
+			name:   "enabled esim with entitlement",
+			option: esimOption(testProfile(sgp22.ProfileEnabled), ""),
+			wantOK: true,
 		},
 		{
-			name:      "disabled esim with entitlement is transferable",
-			candidate: esimCandidate(testProfile(sgp22.ProfileDisabled)),
-			wantOK:    true,
+			name:   "disabled esim with entitlement is transferable",
+			option: esimOption(testProfile(sgp22.ProfileDisabled), ""),
+			wantOK: true,
 		},
 		{
 			name: "physical sim with entitlement",
-			candidate: physicalCandidate(ts43.Identity{
+			option: physicalOption(ts43.Identity{
 				ICCID: "8900000000000000000",
 				MCC:   "204",
 				MNC:   "08",
@@ -54,12 +54,12 @@ func TestCandidateSupport(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:      "esim without entitlement is unsupported",
-			candidate: esimCandidate(testUnsupportedProfile()),
+			name:   "esim without entitlement is unsupported",
+			option: esimOption(testUnsupportedProfile(), ""),
 		},
 		{
 			name: "physical sim without entitlement is unsupported",
-			candidate: physicalCandidate(ts43.Identity{
+			option: physicalOption(ts43.Identity{
 				ICCID: "8900000000000000000",
 				MCC:   "999",
 				MNC:   "99",
@@ -69,8 +69,8 @@ func TestCandidateSupport(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.candidate.response.Supported != tt.wantOK {
-				t.Fatalf("Supported = %v, want %v", tt.candidate.response.Supported, tt.wantOK)
+			if tt.option.Supported != tt.wantOK {
+				t.Fatalf("Supported = %v, want %v", tt.option.Supported, tt.wantOK)
 			}
 		})
 	}
@@ -81,12 +81,13 @@ func TestValidateStartRequiresCCIDIMEI(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		start   Start
+		start   startRequest
 		wantErr error
 	}{
 		{
 			name: "ccid requires source imei when transfer starts",
-			start: Start{
+			start: startRequest{
+				SEID:       "default",
 				SourceType: SourceCCID,
 				SourceID:   "reader-1",
 				ProfileID:  "profile-1",
@@ -95,7 +96,8 @@ func TestValidateStartRequiresCCIDIMEI(t *testing.T) {
 		},
 		{
 			name: "ccid with source imei",
-			start: Start{
+			start: startRequest{
+				SEID:       "default",
 				SourceType: SourceCCID,
 				SourceID:   "reader-1",
 				ProfileID:  "profile-1",
@@ -104,7 +106,8 @@ func TestValidateStartRequiresCCIDIMEI(t *testing.T) {
 		},
 		{
 			name: "modem source does not require extra imei input",
-			start: Start{
+			start: startRequest{
+				SEID:       "default",
 				SourceType: SourceModem,
 				SourceID:   "modem-1",
 				ProfileID:  "profile-1",
@@ -128,21 +131,21 @@ func TestValidateTargetRejectsSourceTargetModem(t *testing.T) {
 	target := &mmodem.Modem{EquipmentIdentifier: "target-imei"}
 	tests := []struct {
 		name    string
-		start   Start
+		start   startRequest
 		wantErr error
 	}{
 		{
 			name:    "same modem source and target",
-			start:   Start{SourceType: SourceModem, SourceID: "target-imei"},
+			start:   startRequest{SourceType: SourceModem, SourceID: "target-imei"},
 			wantErr: ErrSourceIsTarget,
 		},
 		{
 			name:  "different modem source",
-			start: Start{SourceType: SourceModem, SourceID: "source-imei"},
+			start: startRequest{SourceType: SourceModem, SourceID: "source-imei"},
 		},
 		{
 			name:  "ccid source can target modem",
-			start: Start{SourceType: SourceCCID, SourceID: "target-imei"},
+			start: startRequest{SourceType: SourceCCID, SourceID: "target-imei"},
 		},
 	}
 
@@ -292,11 +295,11 @@ func TestCCIDServiceUnavailable(t *testing.T) {
 	}
 }
 
-func TestSourceEndpointCloseOnce(t *testing.T) {
+func TestSourceConnectionCloseOnce(t *testing.T) {
 	t.Parallel()
 
 	calls := 0
-	source := &sourceEndpoint{
+	source := &sourceConnection{
 		release: func() {
 			calls++
 		},
@@ -310,12 +313,12 @@ func TestSourceEndpointCloseOnce(t *testing.T) {
 	}
 }
 
-func TestActiveSessionCloseAllowsMissingTargetClient(t *testing.T) {
+func TestTransferStateCloseAllowsMissingTargetLPA(t *testing.T) {
 	t.Parallel()
 
 	calls := 0
-	active := &activeSession{
-		source: &sourceEndpoint{
+	active := &transferState{
+		source: &sourceConnection{
 			release: func() {
 				calls++
 			},
@@ -330,7 +333,7 @@ func TestActiveSessionCloseAllowsMissingTargetClient(t *testing.T) {
 	}
 }
 
-func TestSessionCancelCancelsContext(t *testing.T) {
+func TestWSSessionCancelCancelsContext(t *testing.T) {
 	t.Parallel()
 
 	done := make(chan error, 1)
@@ -344,7 +347,7 @@ func TestSessionCancelCancelsContext(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_ = newSession(conn, cancel)
+		_ = newWSSession(conn, cancel)
 
 		select {
 		case <-ctx.Done():
@@ -356,7 +359,7 @@ func TestSessionCancelCancelsContext(t *testing.T) {
 	defer server.Close()
 
 	conn := dialTestWebSocket(t, server.URL)
-	if err := conn.WriteJSON(clientMessage{Type: wsTypeCancel}); err != nil {
+	if err := conn.WriteJSON(wsClientMessage{Type: wsTypeCancel}); err != nil {
 		t.Fatalf("WriteJSON() error = %v", err)
 	}
 	if err := conn.Close(); err != nil {
@@ -368,7 +371,7 @@ func TestSessionCancelCancelsContext(t *testing.T) {
 	}
 }
 
-func TestSessionWaitForStartStopsOnDisconnect(t *testing.T) {
+func TestWSSessionWaitForStartStopsOnDisconnect(t *testing.T) {
 	t.Parallel()
 
 	done := make(chan bool, 1)
@@ -382,7 +385,7 @@ func TestSessionWaitForStartStopsOnDisconnect(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		session := newSession(conn, cancel)
+		session := newWSSession(conn, cancel)
 		_, ok := session.waitForStart(ctx)
 		done <- ok
 	}))
@@ -492,7 +495,7 @@ func TestTS43WebsheetResult(t *testing.T) {
 			want: ts43.WebsheetEventProfileReadyWithActivationCode,
 		},
 		{
-			name: "finish flow acquire configuration",
+			name: "finish transfer acquire configuration",
 			callback: websheet.Callback{
 				Event:      "finishFlow",
 				NextAction: "AcquireConfiguration",

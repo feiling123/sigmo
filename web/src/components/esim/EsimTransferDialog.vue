@@ -25,6 +25,7 @@ import type { EsimTransferSource } from '@/types/esim'
 
 const props = defineProps<{
   modemId: string
+  targetSeId: string
 }>()
 
 const emit = defineEmits<{
@@ -140,15 +141,17 @@ const selectProfileID = (id: string) => {
 }
 
 const requestStartTransfer = () => {
+  if (!props.targetSeId.trim()) return
   if (!transfer.canStartTransfer.value) return
   startConfirmOpen.value = true
 }
 
 const confirmStartTransfer = () => {
+  if (!props.targetSeId.trim()) return
   if (!transfer.canStartTransfer.value) return
   startConfirmOpen.value = false
   transferStarted.value = true
-  transfer.startTransfer()
+  transfer.startTransfer(props.targetSeId)
 }
 
 const focusDialogHeader = (target: Ref<TransferHeaderFocus | null>, event: Event) => {
@@ -253,7 +256,7 @@ watch(open, (value) => {
           v-if="ready"
           type="button"
           class="order-1 w-full sm:order-2"
-          :disabled="!transfer.canStartTransfer.value"
+          :disabled="!props.targetSeId.trim() || !transfer.canStartTransfer.value"
           @click="requestStartTransfer"
         >
           {{ t('modemDetail.esim.transferStart') }}

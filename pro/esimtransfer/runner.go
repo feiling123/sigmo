@@ -48,16 +48,16 @@ var (
 	errPhysicalSourceDeletion = errors.New("carrier requested physical SIM deletion")
 )
 
-type Service struct {
+type transferRunner struct {
 	store         *settings.Store
 	registry      *mmodem.Registry
-	enableProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
-	deleteProfile func(context.Context, *mmodem.Modem, sgp22.ICCID) error
+	enableProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
+	deleteProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
 	websheets     *websheet.Broker
 }
 
-func New(opts Config) *Service {
-	return &Service{
+func newTransferRunner(opts Config) *transferRunner {
+	return &transferRunner{
 		store:         opts.Store,
 		registry:      opts.Registry,
 		enableProfile: opts.EnableProfile,
@@ -66,25 +66,22 @@ func New(opts Config) *Service {
 	}
 }
 
-type Start struct {
+type startRequest struct {
+	SEID       string
 	SourceType SourceType
 	SourceID   string
 	ProfileID  string
 	SourceIMEI string
 }
 
-type profileCandidate struct {
-	response ProfileResponse
+type sourceConnection struct {
+	channel ts43.Channel
+	release func()
+	device  ts43.Device
+	simType ts43.SIMType
 }
 
-type sourceEndpoint struct {
-	channel       ts43.Channel
-	release       func()
-	device        ts43.Device
-	sourceSIMType ts43.SIMType
-}
-
-func (s *sourceEndpoint) Close() {
+func (s *sourceConnection) Close() {
 	if s == nil || s.release == nil {
 		return
 	}
@@ -92,17 +89,18 @@ func (s *sourceEndpoint) Close() {
 	s.release = nil
 }
 
-type activeSession struct {
-	settings     *settings.Settings
-	source       *sourceEndpoint
-	target       *mmodem.Modem
-	targetClient *ilpa.LPA
-	client       *ts43.Client
-	logger       *slog.Logger
-	targetClosed bool
+type transferState struct {
+	settings        *settings.Settings
+	source          *sourceConnection
+	target          *mmodem.Modem
+	targetSEID      string
+	targetLPA       *ilpa.LPA
+	ts43Client      *ts43.Client
+	logger          *slog.Logger
+	targetLPAClosed bool
 }
 
-func (t *activeSession) Close() {
+func (t *transferState) Close() {
 	if t == nil {
 		return
 	}
@@ -110,21 +108,21 @@ func (t *activeSession) Close() {
 	t.source.Close()
 }
 
-func (t *activeSession) CloseTarget() {
-	if t == nil || t.targetClosed || t.targetClient == nil {
+func (t *transferState) CloseTarget() {
+	if t == nil || t.targetLPAClosed || t.targetLPA == nil {
 		return
 	}
-	t.targetClosed = true
-	if cerr := t.targetClient.Close(); cerr != nil {
+	t.targetLPAClosed = true
+	if cerr := t.targetLPA.Close(); cerr != nil {
 		t.Logger().Warn("close target LPA client", "error", cerr)
 	}
 }
 
-func (t *activeSession) Logger() *slog.Logger {
+func (t *transferState) Logger() *slog.Logger {
 	return t.logger
 }
 
-func (s *Service) Sources(ctx context.Context, target *mmodem.Modem) (SourcesResponse, error) {
+func (s *transferRunner) Sources(ctx context.Context, target *mmodem.Modem) (SourcesResponse, error) {
 	modems, err := s.registry.Modems(ctx)
 	if err != nil {
 		return SourcesResponse{}, fmt.Errorf("list modems: %w", err)
@@ -158,50 +156,51 @@ func (s *Service) Sources(ctx context.Context, target *mmodem.Modem) (SourcesRes
 	return out, nil
 }
 
-func (s *Service) Profiles(ctx context.Context, target *mmodem.Modem, req ProfilesRequest) ([]ProfileResponse, error) {
+func (s *transferRunner) Profiles(ctx context.Context, target *mmodem.Modem, req ProfilesRequest) ([]ProfileResponse, error) {
 	req = normalizeProfilesRequest(req)
-	if err := validateTarget(target, Start{SourceType: req.SourceType, SourceID: req.SourceID}); err != nil {
+	if err := validateTarget(target, startRequest{SourceType: req.SourceType, SourceID: req.SourceID}); err != nil {
 		return nil, err
 	}
 	currentSettings := s.settingsSnapshot()
-	return s.profileResponses(ctx, currentSettings, req)
+	return s.sourceProfileOptions(ctx, currentSettings, req)
 }
 
-func (s *Service) Serve(ctx context.Context, conn *websocket.Conn, target *mmodem.Modem) error {
+func (s *transferRunner) Serve(ctx context.Context, conn *websocket.Conn, target *mmodem.Modem) error {
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	session := newSession(conn, cancel)
+	session := newWSSession(conn, cancel)
 	startMsg, ok := session.waitForStart(sessionCtx)
 	if !ok {
 		return nil
 	}
-	start := Start{
+	start := startRequest{
+		SEID:       strings.TrimSpace(startMsg.SEID),
 		SourceType: SourceType(strings.TrimSpace(string(startMsg.SourceType))),
 		SourceID:   strings.TrimSpace(startMsg.SourceID),
 		ProfileID:  strings.TrimSpace(startMsg.ProfileID),
 		SourceIMEI: strings.TrimSpace(startMsg.SourceIMEI),
 	}
 	if err := s.run(sessionCtx, session, target, start); err != nil {
-		_ = session.send(serverMessage{Type: wsTypeError, Message: err.Error()})
+		_ = session.send(wsServerMessage{Type: wsTypeError, Message: err.Error()})
 		return nil
 	}
-	_ = session.send(serverMessage{Type: wsTypeCompleted})
+	_ = session.send(wsServerMessage{Type: wsTypeCompleted})
 	return nil
 }
 
-func (s *Service) settingsSnapshot() *settings.Settings {
+func (s *transferRunner) settingsSnapshot() *settings.Settings {
 	currentSettings := s.store.Snapshot()
 	return &currentSettings
 }
 
-func (s *Service) run(ctx context.Context, session *session, target *mmodem.Modem, start Start) error {
+func (s *transferRunner) run(ctx context.Context, session *wsSession, target *mmodem.Modem, start startRequest) error {
 	if err := validateStart(start); err != nil {
 		return err
 	}
 	if err := validateTarget(target, start); err != nil {
 		return err
 	}
-	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stagePreparing})
+	session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stagePreparing})
 
 	active, err := s.prepare(ctx, target, start)
 	if err != nil {
@@ -209,8 +208,8 @@ func (s *Service) run(ctx context.Context, session *session, target *mmodem.Mode
 	}
 	defer active.Close()
 
-	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stageCarrier})
-	result, err := active.client.Transfer(ctx)
+	session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stageCarrier})
+	result, err := active.ts43Client.Transfer(ctx)
 	if err != nil {
 		return fmt.Errorf("start transfer: %w", err)
 	}
@@ -226,8 +225,8 @@ func (s *Service) run(ctx context.Context, session *session, target *mmodem.Mode
 	}
 }
 
-func validateStart(start Start) error {
-	if start.SourceType == "" || start.SourceID == "" || start.ProfileID == "" {
+func validateStart(start startRequest) error {
+	if start.SEID == "" || start.SourceType == "" || start.SourceID == "" || start.ProfileID == "" {
 		return errors.New("source and profile are required")
 	}
 	switch start.SourceType {
@@ -250,7 +249,7 @@ func normalizeProfilesRequest(req ProfilesRequest) ProfilesRequest {
 	}
 }
 
-func validateTarget(target *mmodem.Modem, start Start) error {
+func validateTarget(target *mmodem.Modem, start startRequest) error {
 	if target == nil || start.SourceType != SourceModem {
 		return nil
 	}
@@ -260,9 +259,9 @@ func validateTarget(target *mmodem.Modem, start Start) error {
 	return nil
 }
 
-func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start) (*activeSession, error) {
+func (s *transferRunner) prepare(ctx context.Context, target *mmodem.Modem, start startRequest) (*transferState, error) {
 	currentSettings := s.settingsSnapshot()
-	candidates, err := s.profileCandidates(ctx, currentSettings, ProfilesRequest{
+	options, err := s.sourceProfileOptions(ctx, currentSettings, ProfilesRequest{
 		SourceType: start.SourceType,
 		SourceID:   start.SourceID,
 		SourceIMEI: start.SourceIMEI,
@@ -270,11 +269,11 @@ func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start
 	if err != nil {
 		return nil, err
 	}
-	candidate, ok := findCandidate(candidates, start.ProfileID)
-	if !ok || !candidate.response.Supported {
+	option, ok := findSourceProfileOption(options, start.ProfileID)
+	if !ok || !option.Supported {
 		return nil, ErrProfileUnsupported
 	}
-	if err := s.activateSourceProfile(ctx, currentSettings, start, candidate); err != nil {
+	if err := s.activateSourceProfile(ctx, currentSettings, start, option); err != nil {
 		return nil, err
 	}
 
@@ -282,8 +281,8 @@ func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start
 	if err != nil {
 		return nil, err
 	}
-	source.sourceSIMType = ts43SourceSIMType(candidate.response.Type)
-	source.device.ICCID = candidate.response.ICCID
+	source.simType = ts43SourceSIMType(option.Type)
+	source.device.ICCID = option.ICCID
 	releaseSource := true
 	defer func() {
 		if releaseSource {
@@ -291,15 +290,19 @@ func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start
 		}
 	}()
 
-	targetClient, err := ilpa.New(target, currentSettings)
+	targetSE, err := ilpa.ResolveSE(target, start.SEID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve target eUICC SE: %w", err)
+	}
+	targetLPA, err := ilpa.NewWithAID(target, currentSettings, targetSE.AID)
 	if err != nil {
 		return nil, fmt.Errorf("create target LPA client: %w", err)
 	}
 	releaseTarget := true
 	defer func() {
 		if releaseTarget {
-			if cerr := targetClient.Close(); cerr != nil {
-				targetClient.Logger().Warn("close target LPA client", "error", cerr)
+			if cerr := targetLPA.Close(); cerr != nil {
+				targetLPA.Logger().Warn("close target LPA client", "error", cerr)
 			}
 		}
 	}()
@@ -308,16 +311,16 @@ func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start
 	if err != nil {
 		return nil, fmt.Errorf("read target IMEI: %w", err)
 	}
-	eid, err := targetClient.EID()
+	eid, err := targetLPA.EID()
 	if err != nil {
 		return nil, fmt.Errorf("read target EID: %w", err)
 	}
 	targetDevice := ts43Device(targetIMEI)
 	targetDevice.EID = strings.ToUpper(hex.EncodeToString(eid))
 	logger := transferLogger(targetIMEI, source.device.IMEI)
-	client, err := ts43.New(&ts43.Config{
+	ts43Client, err := ts43.New(&ts43.Config{
 		Logger:      logger,
-		Entitlement: ts43.Entitlement{SourceSIMType: source.sourceSIMType},
+		Entitlement: ts43.Entitlement{SourceSIMType: source.simType},
 		Source:      ts43.Endpoint{Channel: source.channel, Device: source.device},
 		Target: ts43.Endpoint{
 			Device: targetDevice,
@@ -329,17 +332,18 @@ func (s *Service) prepare(ctx context.Context, target *mmodem.Modem, start Start
 
 	releaseSource = false
 	releaseTarget = false
-	return &activeSession{
-		settings:     currentSettings,
-		source:       source,
-		target:       target,
-		targetClient: targetClient,
-		client:       client,
-		logger:       logger,
+	return &transferState{
+		settings:   currentSettings,
+		source:     source,
+		target:     target,
+		targetSEID: targetSE.ID,
+		targetLPA:  targetLPA,
+		ts43Client: ts43Client,
+		logger:     logger,
 	}, nil
 }
 
-func (s *Service) handleEvent(ctx context.Context, session *session, active *activeSession, start Start, result *ts43.Result) (*ts43.Result, bool, error) {
+func (s *transferRunner) handleEvent(ctx context.Context, session *wsSession, active *transferState, start startRequest, result *ts43.Result) (*ts43.Result, bool, error) {
 	switch event := result.Event.(type) {
 	case ts43.UserInputEvent:
 		active.Logger().Info("TS.43 transfer requires user input")
@@ -348,7 +352,7 @@ func (s *Service) handleEvent(ctx context.Context, session *session, active *act
 			active.Logger().Warn("TS.43 user input interrupted", "error", err)
 			return result, false, err
 		}
-		next, err := active.client.Continue(ctx, result, ts43.ContinueRequest{UserInput: answer})
+		next, err := active.ts43Client.Continue(ctx, result, ts43.ContinueRequest{UserInput: answer})
 		if err != nil {
 			active.Logger().Warn("continue TS.43 transfer after user input", "error", err)
 		}
@@ -368,7 +372,7 @@ func (s *Service) handleEvent(ctx context.Context, session *session, active *act
 		return next, false, err
 	case ts43.DownloadReadyEvent:
 		active.Logger().Info("TS.43 transfer download is ready", "smdp", event.Config.SMDPFQDN, "profileICCID", event.Config.ProfileICCID)
-		next, err := s.downloadEnableAndComplete(ctx, session, active, result, event.Config)
+		next, err := s.downloadAndCompleteActivation(ctx, session, active, result, event.Config)
 		if err != nil {
 			active.Logger().Warn("download TS.43 transferred profile", "error", err)
 		}
@@ -394,30 +398,30 @@ func (s *Service) handleEvent(ctx context.Context, session *session, active *act
 	}
 }
 
-func (s *Service) handleSMDSDiscovery(ctx context.Context, session *session, active *activeSession, result *ts43.Result, event ts43.SMDSDiscoveryEvent) (*ts43.Result, error) {
+func (s *transferRunner) handleSMDSDiscovery(ctx context.Context, session *wsSession, active *transferState, result *ts43.Result, event ts43.SMDSDiscoveryEvent) (*ts43.Result, error) {
 	active.Logger().Info("TS.43 transfer requires SM-DS discovery", "targetEID", event.TargetEID, "subscriptionResult", event.SubscriptionResult)
-	downloadConfig, err := smdsDownloadConfig(ctx, active.targetClient, event)
+	downloadConfig, err := smdsDownloadConfig(ctx, active.targetLPA, event)
 	if err != nil {
 		active.Logger().Warn("resolve TS.43 SM-DS download config", "error", err)
 		return result, err
 	}
-	next, err := s.downloadEnableAndComplete(ctx, session, active, result, downloadConfig)
+	next, err := s.downloadAndCompleteActivation(ctx, session, active, result, downloadConfig)
 	if err != nil {
 		active.Logger().Warn("download TS.43 SM-DS transferred profile", "error", err)
 	}
 	return next, err
 }
 
-func (s *Service) handleSourceProfileDeletion(ctx context.Context, session *session, active *activeSession, start Start, result *ts43.Result, event ts43.SourceProfileDeletionEvent) (*ts43.Result, error) {
+func (s *transferRunner) handleSourceProfileDeletion(ctx context.Context, session *wsSession, active *transferState, start startRequest, result *ts43.Result, event ts43.SourceProfileDeletionEvent) (*ts43.Result, error) {
 	if err := session.confirmSourceDeletion(ctx, event.ICCID); err != nil {
 		return result, err
 	}
-	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stageDeleting})
+	session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stageDeleting})
 	active.source.Close()
 	if err := s.deleteSourceProfile(ctx, active.settings, start, event.ICCID); err != nil {
 		return result, err
 	}
-	return active.client.Continue(ctx, result, ts43.ContinueRequest{SourceProfileDeleted: true})
+	return active.ts43Client.Continue(ctx, result, ts43.ContinueRequest{SourceProfileDeleted: true})
 }
 
 func ts43Device(imei string) ts43.Device {

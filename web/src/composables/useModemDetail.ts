@@ -1,14 +1,14 @@
 import { computed, ref } from 'vue'
 
 import { useEsimApi } from '@/apis/esim'
-import { useEuiccApi } from '@/apis/euicc'
+import { useSEApi } from '@/apis/se'
 import { useModemResource } from '@/composables/useModemResource'
 import type { EsimProfile, EsimProfileApiResponse } from '@/types/esim'
-import type { EuiccApiResponse } from '@/types/euicc'
+import type { SEsResponse } from '@/types/se'
 
 export const useModemDetail = () => {
   const esimApi = useEsimApi()
-  const euiccApi = useEuiccApi()
+  const seApi = useSEApi()
 
   const modemId = ref('')
   const {
@@ -17,14 +17,17 @@ export const useModemDetail = () => {
     error: modemError,
     refresh: refreshModemResource,
   } = useModemResource(computed(() => modemId.value))
-  const euicc = ref<EuiccApiResponse | null>(null)
+  const seInfo = ref<SEsResponse | null>(null)
   const esimProfiles = ref<EsimProfile[]>([])
-  const isEuiccLoading = ref(false)
+  const isSELoading = ref(false)
   const isEsimProfilesLoading = ref(false)
 
   const mapEsimProfile = (profile: EsimProfileApiResponse): EsimProfile => {
     return {
-      id: profile.iccid,
+      id: `${profile.seId}:${profile.iccid}`,
+      seId: profile.seId,
+      seLabel: profile.seLabel,
+      seEid: profile.seEid,
       name: profile.name,
       iccid: profile.iccid,
       isdPAID: profile.isdPAID,
@@ -40,20 +43,20 @@ export const useModemDetail = () => {
     }
   }
 
-  const fetchEuicc = async (id: string) => {
-    isEuiccLoading.value = true
+  const fetchSEs = async (id: string) => {
+    isSELoading.value = true
 
     try {
-      const { data } = await euiccApi.getEuicc(id)
+      const { data } = await seApi.getSEs(id)
 
       if (data.value) {
-        euicc.value = data.value
+        seInfo.value = data.value
       }
     } catch (err) {
-      console.error('[useModemDetail] Failed to fetch eUICC info:', err)
-      euicc.value = null
+      console.error('[useModemDetail] Failed to fetch SE info:', err)
+      seInfo.value = null
     } finally {
-      isEuiccLoading.value = false
+      isSELoading.value = false
     }
   }
 
@@ -62,7 +65,16 @@ export const useModemDetail = () => {
     try {
       const { data } = await esimApi.getEsims(id)
       if (data.value) {
-        esimProfiles.value = data.value.map(mapEsimProfile)
+        esimProfiles.value = data.value.ses.flatMap((group) =>
+          group.profiles.map((profile) =>
+            mapEsimProfile({
+              ...profile,
+              seId: profile.seId || group.id,
+              seLabel: profile.seLabel || group.label,
+              seEid: profile.seEid || group.eid,
+            }),
+          ),
+        )
       } else {
         esimProfiles.value = []
       }
@@ -76,29 +88,29 @@ export const useModemDetail = () => {
 
   const fetchModemDetail = async (id: string) => {
     modemId.value = id
-    euicc.value = null
+    seInfo.value = null
     esimProfiles.value = []
 
     await refreshModemResource()
     if (modem.value?.supportsEsim) {
-      void fetchEuicc(id)
+      void fetchSEs(id)
       void fetchEsimProfiles(id)
     }
   }
 
   return {
     modem,
-    euicc,
+    seInfo,
     esimProfiles,
     isLoading,
-    isEuiccLoading,
+    isSELoading,
     isEsimProfilesLoading,
     error: modemError,
     hasModem: computed(() => modem.value !== null),
     isPhysicalModem: computed(() => Boolean(modem.value && !modem.value.supportsEsim)),
     isEsimModem: computed(() => Boolean(modem.value && modem.value.supportsEsim)),
     fetchModemDetail,
-    fetchEuicc,
+    fetchSEs,
     fetchEsimProfiles,
   }
 }

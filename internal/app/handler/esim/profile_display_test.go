@@ -29,6 +29,9 @@ func TestProfileResponseFrom(t *testing.T) {
 				},
 			},
 			want: ProfileResponse{
+				SEID:                "se0",
+				SELabel:             "SE1",
+				EID:                 "eid-1",
 				Name:                "Travel",
 				ServiceProviderName: "Carrier",
 				ICCID:               "8901000000000000001",
@@ -50,7 +53,16 @@ func TestProfileResponseFrom(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := profileResponseFrom(tt.info)
+			got := profileResponseFrom(tt.info, "se0", "SE1", "eid-1")
+			if got.SEID != tt.want.SEID {
+				t.Fatalf("SEID = %q, want %q", got.SEID, tt.want.SEID)
+			}
+			if got.SELabel != tt.want.SELabel {
+				t.Fatalf("SELabel = %q, want %q", got.SELabel, tt.want.SELabel)
+			}
+			if got.EID != tt.want.EID {
+				t.Fatalf("EID = %q, want %q", got.EID, tt.want.EID)
+			}
 			if got.Name != tt.want.Name {
 				t.Fatalf("Name = %q, want %q", got.Name, tt.want.Name)
 			}

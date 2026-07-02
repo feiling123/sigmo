@@ -68,7 +68,7 @@ const buildCallWebSocketUrl = (id: string, path: string) => {
 export const buildCallEventsUrl = (id: string) => buildCallWebSocketUrl(id, '/events')
 
 export const buildWebRTCSessionUrl = (id: string, callID: string) =>
-  buildCallWebSocketUrl(id, `/${encodeURIComponent(callID)}/webrtc-sessions`)
+  buildCallWebSocketUrl(id, `/${encodeURIComponent(callID)}/webrtc/sessions`)
 
 const requestCallApi = async <T>(
   id: string,

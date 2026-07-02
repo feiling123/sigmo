@@ -161,6 +161,7 @@ type fakeSmartCardChannel struct {
 	disconnectErr          error
 	closeLogicalChannelErr error
 	openLogicalChannelErr  error
+	transmitResponse       []byte
 	logicalChannel         byte
 	disconnects            int
 }
@@ -185,6 +186,9 @@ func (f *fakeSmartCardChannel) OpenLogicalChannel([]byte) (byte, error) {
 }
 
 func (f *fakeSmartCardChannel) Transmit([]byte) ([]byte, error) {
+	if f.transmitResponse != nil {
+		return f.transmitResponse, nil
+	}
 	return []byte{0x90, 0x00}, nil
 }
 

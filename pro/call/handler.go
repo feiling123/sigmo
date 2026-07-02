@@ -22,7 +22,7 @@ import (
 
 type Handler struct {
 	registry *mmodem.Registry
-	calls    *Service
+	calls    *Calls
 	media    *Media
 }
 
@@ -65,13 +65,13 @@ var callWSUpgrader = websocket.Upgrader{
 	},
 }
 
-func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, calls *Service, media *Media) {
+func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, calls *Calls, media *Media) {
 	h := &Handler{registry: registry, calls: calls, media: media}
 	group.GET("/call-media/ice-servers", h.WebRTCICEServers)
 	group.GET("/modems/:id/calls", h.List)
 	group.POST("/modems/:id/calls", h.Dial)
 	group.GET("/modems/:id/calls/events", h.Events)
-	group.GET("/modems/:id/calls/:callID/webrtc-sessions", h.WebRTCSession)
+	group.GET("/modems/:id/calls/:callID/webrtc/sessions", h.WebRTCSession)
 	group.POST("/modems/:id/calls/:callID/dtmf-events", h.SendDTMF)
 	group.PATCH("/modems/:id/calls/:callID", h.Update)
 	group.DELETE("/modems/:id/calls/:callID", h.Delete)

@@ -47,7 +47,7 @@ Before creating a browser offer, the UI loads ICE configuration from
 `GET /api/v1/call-media/ice-servers`. The backend uses the same ICE
 configuration when creating the WebRTC answer. Offer, answer, and trickled ICE
 candidates are exchanged over
-`GET /api/v1/modems/{id}/calls/{callID}/webrtc-sessions` as a WebSocket.
+`GET /api/v1/modems/{id}/calls/{callID}/webrtc/sessions` as a WebSocket.
 
 Sigmo fetches short-lived Cloudflare TURN credentials from
 `https://speed.cloudflare.com/turn-creds`. The backend filters WebRTC host

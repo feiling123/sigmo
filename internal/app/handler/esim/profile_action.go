@@ -10,8 +10,8 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-func (h *Handler) EnableProfile(ctx context.Context, modem *mmodem.Modem, iccid sgp22.ICCID) error {
-	session, err := h.lifecycle.PrepareEnable(modem, iccid)
+func (h *Handler) EnableProfile(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
+	session, err := h.lifecycle.PrepareEnable(modem, seID, iccid)
 	if err != nil {
 		if errors.Is(err, errProfileAlreadyActive) {
 			return nil
@@ -19,6 +19,7 @@ func (h *Handler) EnableProfile(ctx context.Context, modem *mmodem.Modem, iccid 
 		return err
 	}
 	defer session.Close()
+
 	sessionCtx, cancel := context.WithTimeout(ctx, enableTimeout)
 	defer cancel()
 	if err := h.restoreInternetBeforeProfileEnable(sessionCtx, modem); err != nil {
@@ -27,6 +28,6 @@ func (h *Handler) EnableProfile(ctx context.Context, modem *mmodem.Modem, iccid 
 	return session.Enable(sessionCtx)
 }
 
-func (h *Handler) DeleteProfile(ctx context.Context, modem *mmodem.Modem, iccid sgp22.ICCID) error {
-	return h.lifecycle.Delete(modem, iccid)
+func (h *Handler) DeleteProfile(modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
+	return h.lifecycle.Delete(modem, seID, iccid)
 }

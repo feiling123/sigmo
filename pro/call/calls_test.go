@@ -373,7 +373,7 @@ func TestEndUnavailableWiFiCallingMediaClosesStoredCall(t *testing.T) {
 		t.Fatalf("SaveCall() error = %v", err)
 	}
 
-	service.endUnavailableWiFiCallingMedia(ctx, call)
+	service.media.endUnavailable(ctx, call)
 
 	stored, err := store.GetCall(ctx, call.ID)
 	if err != nil {
@@ -402,7 +402,7 @@ func TestEndUnavailableWiFiCallingMediaIgnoresTerminalCall(t *testing.T) {
 	events, unsubscribe := service.Subscribe(1)
 	defer unsubscribe()
 
-	service.endUnavailableWiFiCallingMedia(context.Background(), storage.Call{
+	service.media.endUnavailable(context.Background(), storage.Call{
 		ID:        "call-ended",
 		ProfileID: "profile-a",
 		ModemID:   "modem-1",
@@ -589,7 +589,7 @@ func TestSaveAndPublishKeepsTerminalCallClosed(t *testing.T) {
 			}
 			next.UpdatedAt = time.Date(2026, 5, 28, 15, 2, 0, 0, time.UTC)
 
-			got, err := service.saveAndPublish(ctx, next)
+			got, err := service.records.saveAndPublish(ctx, next)
 			if err != nil {
 				t.Fatalf("saveAndPublish() error = %v", err)
 			}
@@ -814,7 +814,7 @@ func TestDeleteRemovesTerminalCallRecords(t *testing.T) {
 		t.Fatalf("SaveCall() error = %v", err)
 	}
 
-	if err := service.deleteCall(ctx, call); err != nil {
+	if err := service.records.deleteCall(ctx, call); err != nil {
 		t.Fatalf("deleteCall() error = %v", err)
 	}
 	if _, err := store.GetCall(ctx, call.ID); !errors.Is(err, storage.ErrNotFound) {
@@ -841,7 +841,7 @@ func TestDeleteRejectsActiveCallRecords(t *testing.T) {
 		t.Fatalf("SaveCall() error = %v", err)
 	}
 
-	err := service.deleteCall(ctx, call)
+	err := service.records.deleteCall(ctx, call)
 	if !errors.Is(err, ErrCallRecordActive) {
 		t.Fatalf("deleteCall() error = %v, want %v", err, ErrCallRecordActive)
 	}
@@ -854,7 +854,7 @@ func TestSubscribeUnsubscribeLeavesChannelOpen(t *testing.T) {
 	service := New(nil, fakeWiFiCalling{})
 	events, unsubscribe := service.Subscribe(1)
 	unsubscribe()
-	service.publish(Event{Call: storage.Call{ID: "call-1"}})
+	service.events.publish(Event{Call: storage.Call{ID: "call-1"}})
 
 	select {
 	case _, ok := <-events:

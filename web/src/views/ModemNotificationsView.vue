@@ -38,7 +38,7 @@ const confirmDelete = async () => {
   if (!deleteTarget.value) return
   deleteLoading.value = true
   try {
-    await deleteNotification(deleteTarget.value.sequenceNumber)
+    await deleteNotification(deleteTarget.value.seId, deleteTarget.value.sequenceNumber)
   } catch (err) {
     console.error('[ModemNotificationsView] Failed to delete notification:', err)
   } finally {
@@ -49,9 +49,9 @@ const confirmDelete = async () => {
 
 const handleResend = async (item: NotificationItem) => {
   if (resendSequence.value) return
-  resendSequence.value = item.sequenceNumber
+  resendSequence.value = item.key
   try {
-    await resendNotification(item.sequenceNumber)
+    await resendNotification(item.seId, item.sequenceNumber)
     toast.success(t('modemDetail.notifications.resendSuccess'))
   } catch (err) {
     console.error('[ModemNotificationsView] Failed to resend notification:', err)

@@ -55,12 +55,12 @@ const (
 
 func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, wifiCalling Coordinator) {
 	h := &Handler{registry: registry, wifiCalling: wifiCalling}
-	group.GET("/modems/:id/wifi-calling-settings", h.Settings)
-	group.PUT("/modems/:id/wifi-calling-settings", h.UpdateSettings)
-	group.POST("/modems/:id/wifi-calling-sessions", h.CreateSession)
-	group.DELETE("/modems/:id/wifi-calling-sessions/current", h.DeleteSession)
-	group.POST("/modems/:id/wifi-calling-websheets", h.StartWebsheet)
-	group.POST("/modems/:id/wifi-calling-emergency-address-websheets", h.StartEmergencyAddressWebsheet)
+	group.GET("/modems/:id/wifi-calling/settings", h.Settings)
+	group.PUT("/modems/:id/wifi-calling/settings", h.UpdateSettings)
+	group.POST("/modems/:id/wifi-calling/sessions", h.CreateSession)
+	group.DELETE("/modems/:id/wifi-calling/sessions/current", h.DeleteSession)
+	group.POST("/modems/:id/wifi-calling/websheets", h.StartWebsheet)
+	group.POST("/modems/:id/wifi-calling/emergency-address-websheets", h.StartEmergencyAddressWebsheet)
 }
 
 func (h *Handler) UpdateSettings(c *echo.Context) error {

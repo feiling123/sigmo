@@ -9,6 +9,7 @@ import {
   AlertDialog,
   AlertDialogCancel,
   AlertDialogContent,
+  AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -157,6 +158,9 @@ const slotOptionClass = (slot: SlotInfo) => {
     <AlertDialogContent>
       <AlertDialogHeader>
         <AlertDialogTitle>{{ confirmTitle }}</AlertDialogTitle>
+        <AlertDialogDescription class="sr-only">
+          {{ confirmTitle }}
+        </AlertDialogDescription>
       </AlertDialogHeader>
       <div v-if="pendingSlot" class="flex min-w-0 items-center gap-2.5">
         <div

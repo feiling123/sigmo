@@ -9,6 +9,22 @@ const modemHarness = vi.hoisted(() => ({
   fetchModems: vi.fn(),
 }))
 
+const appInfoHarness = vi.hoisted(() => ({
+  version: 'v1.2.3',
+  fetchAppInfo: vi.fn(),
+}))
+
+vi.mock('@/composables/useAppInfo', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+
+  return {
+    useAppInfo: () => ({
+      version: ref(appInfoHarness.version),
+      fetchAppInfo: appInfoHarness.fetchAppInfo,
+    }),
+  }
+})
+
 vi.mock('@/composables/useModems', async () => {
   const { computed, ref } = await vi.importActual<typeof import('vue')>('vue')
 
@@ -72,9 +88,9 @@ const mountView = async () => {
     global: {
       stubs: {
         HomeHeader: {
-          props: ['subtitle', 'isLoading'],
+          props: ['subtitle', 'version', 'isLoading'],
           emits: ['refresh'],
-          template: '<button type="button" @click="$emit(\'refresh\')">{{ subtitle }}</button>',
+          template: '<button type="button" @click="$emit(\'refresh\')">{{ subtitle }} {{ version }}</button>',
         },
         HomeModemList: {
           props: ['items', 'isLoading'],
@@ -90,6 +106,9 @@ const mountView = async () => {
 
 describe('HomeView', () => {
   beforeEach(() => {
+    appInfoHarness.fetchAppInfo.mockReset()
+    appInfoHarness.fetchAppInfo.mockResolvedValue(undefined)
+    appInfoHarness.version = 'v1.2.3'
     modemHarness.fetchModems.mockReset()
     modemHarness.fetchModems.mockResolvedValue(undefined)
     modemHarness.nextModems = []
@@ -108,7 +127,9 @@ describe('HomeView', () => {
 
     const wrapper = await mountView()
 
+    expect(appInfoHarness.fetchAppInfo).toHaveBeenCalledTimes(1)
     expect(modemHarness.fetchModems).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('v1.2.3')
     expect(wrapper.get('[data-testid="modem-list"]').text()).toBe(wantCount)
   })
 })

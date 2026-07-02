@@ -14,7 +14,6 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	procall "github.com/damonto/sigmo/pro/call"
 )
 
 func TestCallActionErrorMapsExpectedFailures(t *testing.T) {
@@ -25,21 +24,21 @@ func TestCallActionErrorMapsExpectedFailures(t *testing.T) {
 		wantCode   string
 		wantMsg    string
 	}{
-		{name: "ussd dial string", err: procall.ErrUSSDDialString, wantStatus: http.StatusBadRequest, wantCode: errorCodeUSSDDialString},
-		{name: "invalid number", err: procall.ErrInvalidNumber, wantStatus: http.StatusBadRequest, wantCode: errorCodeCallNumberInvalid},
-		{name: "no call route available", err: procall.ErrNoRouteAvailable, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeNoCallRouteAvailable},
-		{name: "wifi calling disconnected", err: procall.ErrWiFiCallingNotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
-		{name: "modem calling unavailable", err: procall.ErrModemCallingUnavailable, wantStatus: http.StatusNotImplemented, wantCode: errorCodeModemCallingUnavailable},
-		{name: "invalid call state", err: procall.ErrInvalidCallState, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidCallState},
-		{name: "invalid call hold", err: procall.ErrInvalidCallHold, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidCallHold},
-		{name: "state and hold conflict", err: procall.ErrCallUpdateConflict, wantStatus: http.StatusBadRequest, wantCode: errorCodeCallUpdateConflict},
-		{name: "dtmf digits required", err: procall.ErrDTMFDigitsRequired, wantStatus: http.StatusBadRequest, wantCode: errorCodeDTMFDigitsRequired},
-		{name: "invalid dtmf digit", err: procall.ErrInvalidDTMFDigit, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidDTMFDigit},
-		{name: "invalid dtmf state", err: procall.ErrInvalidDTMFCallState, wantStatus: http.StatusConflict, wantCode: errorCodeInvalidDTMFCallState},
-		{name: "call on hold", err: procall.ErrCallOnHold, wantStatus: http.StatusConflict, wantCode: errorCodeCallOnHold},
-		{name: "dtmf unsupported", err: procall.ErrUnsupportedDTMF, wantStatus: http.StatusNotImplemented, wantCode: errorCodeCallDTMFUnsupported},
-		{name: "active call record delete", err: procall.ErrCallRecordActive, wantStatus: http.StatusConflict, wantCode: errorCodeCallRecordActive},
-		{name: "wrapped wifi calling disconnected", err: errors.Join(errors.New("dial route"), procall.ErrWiFiCallingNotConnected), wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
+		{name: "ussd dial string", err: ErrUSSDDialString, wantStatus: http.StatusBadRequest, wantCode: errorCodeUSSDDialString},
+		{name: "invalid number", err: ErrInvalidNumber, wantStatus: http.StatusBadRequest, wantCode: errorCodeCallNumberInvalid},
+		{name: "no call route available", err: ErrNoRouteAvailable, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeNoCallRouteAvailable},
+		{name: "wifi calling disconnected", err: ErrWiFiCallingNotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
+		{name: "modem calling unavailable", err: ErrModemCallingUnavailable, wantStatus: http.StatusNotImplemented, wantCode: errorCodeModemCallingUnavailable},
+		{name: "invalid call state", err: ErrInvalidCallState, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidCallState},
+		{name: "invalid call hold", err: ErrInvalidCallHold, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidCallHold},
+		{name: "state and hold conflict", err: ErrCallUpdateConflict, wantStatus: http.StatusBadRequest, wantCode: errorCodeCallUpdateConflict},
+		{name: "dtmf digits required", err: ErrDTMFDigitsRequired, wantStatus: http.StatusBadRequest, wantCode: errorCodeDTMFDigitsRequired},
+		{name: "invalid dtmf digit", err: ErrInvalidDTMFDigit, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidDTMFDigit},
+		{name: "invalid dtmf state", err: ErrInvalidDTMFCallState, wantStatus: http.StatusConflict, wantCode: errorCodeInvalidDTMFCallState},
+		{name: "call on hold", err: ErrCallOnHold, wantStatus: http.StatusConflict, wantCode: errorCodeCallOnHold},
+		{name: "dtmf unsupported", err: ErrUnsupportedDTMF, wantStatus: http.StatusNotImplemented, wantCode: errorCodeCallDTMFUnsupported},
+		{name: "active call record delete", err: ErrCallRecordActive, wantStatus: http.StatusConflict, wantCode: errorCodeCallRecordActive},
+		{name: "wrapped wifi calling disconnected", err: errors.Join(errors.New("dial route"), ErrWiFiCallingNotConnected), wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
 		{name: "dial rejection", err: errors.New("dial Wi-Fi Calling: Credit limit reached"), wantStatus: http.StatusBadGateway, wantCode: errorCodeDialCallFailed, wantMsg: "Credit limit reached"},
 	}
 
@@ -78,15 +77,15 @@ func TestCallMediaErrorMapsExpectedFailures(t *testing.T) {
 		wantStatus int
 		wantCode   string
 	}{
-		{name: "unsupported codec", err: procall.ErrUnsupportedCodec, wantStatus: http.StatusUnsupportedMediaType, wantCode: errorCodeCallMediaUnsupportedCodec},
-		{name: "media unavailable", err: procall.ErrMediaUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeCallMediaUnavailable},
-		{name: "wifi calling disconnected", err: procall.ErrWiFiCallingNotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
+		{name: "unsupported codec", err: ErrUnsupportedCodec, wantStatus: http.StatusUnsupportedMediaType, wantCode: errorCodeCallMediaUnsupportedCodec},
+		{name: "media unavailable", err: ErrMediaUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeCallMediaUnavailable},
+		{name: "wifi calling disconnected", err: ErrWiFiCallingNotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := echo.New()
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/modems/test/calls/test/webrtc-sessions", nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/modems/test/calls/test/webrtc/sessions", nil)
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 
@@ -149,10 +148,10 @@ func TestBuildCallResponseFormatsUnsetTimesAsEmptyStrings(t *testing.T) {
 	startedAt := time.Date(2026, 5, 27, 10, 0, 0, 123, time.UTC)
 	response := buildCallResponse(storage.Call{
 		ID:        "call-1",
-		Route:     procall.RouteWiFiCalling,
-		Direction: procall.DirectionOutgoing,
+		Route:     RouteWiFiCalling,
+		Direction: DirectionOutgoing,
 		Number:    "+12242255559",
-		State:     procall.StateDialing,
+		State:     StateDialing,
 		StartedAt: startedAt,
 		UpdatedAt: startedAt,
 	})
@@ -163,8 +162,8 @@ func TestBuildCallResponseFormatsUnsetTimesAsEmptyStrings(t *testing.T) {
 	if response.Number != "+12242255559" {
 		t.Fatalf("Number = %q, want raw number", response.Number)
 	}
-	if response.Hold != procall.HoldNone {
-		t.Fatalf("Hold = %q, want %q", response.Hold, procall.HoldNone)
+	if response.Hold != HoldNone {
+		t.Fatalf("Hold = %q, want %q", response.Hold, HoldNone)
 	}
 	if response.UpdatedAt != response.StartedAt {
 		t.Fatalf("UpdatedAt = %q, want %q", response.UpdatedAt, response.StartedAt)
@@ -177,12 +176,12 @@ func TestBuildCallResponseFormatsUnsetTimesAsEmptyStrings(t *testing.T) {
 func TestBuildWebRTCICEServersResponse(t *testing.T) {
 	tests := []struct {
 		name    string
-		servers []procall.WebRTCICEServer
+		servers []WebRTCICEServer
 		wantURL string
 	}{
 		{
 			name: "turn credentials",
-			servers: []procall.WebRTCICEServer{
+			servers: []WebRTCICEServer{
 				{
 					URLs:       []string{"turn:turn.example.com:3478"},
 					Username:   "sigmo",
@@ -193,7 +192,7 @@ func TestBuildWebRTCICEServersResponse(t *testing.T) {
 		},
 		{
 			name: "stun",
-			servers: []procall.WebRTCICEServer{
+			servers: []WebRTCICEServer{
 				{URLs: []string{"stun:stun.l.google.com:19302"}},
 			},
 			wantURL: "stun:stun.l.google.com:19302",
@@ -226,23 +225,23 @@ func TestCurrentCallEventsFiltersTerminalAndOtherModemCalls(t *testing.T) {
 		{
 			name: "current calls only",
 			calls: []storage.Call{
-				{ID: "dialing", ModemID: "modem-1", State: procall.StateDialing},
-				{ID: "ringing", ModemID: "modem-1", State: procall.StateRinging},
-				{ID: "answering", ModemID: "modem-1", State: procall.StateAnswering},
-				{ID: "early-media", ModemID: "modem-1", State: procall.StateEarlyMedia},
-				{ID: "active", ModemID: "modem-1", State: procall.StateActive},
-				{ID: "confirmed", ModemID: "modem-1", State: procall.StateConfirmed},
-				{ID: "ending", ModemID: "modem-1", State: procall.StateEnding},
-				{ID: "ended", ModemID: "modem-1", State: procall.StateEnded},
-				{ID: "failed", ModemID: "modem-1", State: procall.StateFailed},
-				{ID: "other", ModemID: "modem-2", State: procall.StateActive},
+				{ID: "dialing", ModemID: "modem-1", State: StateDialing},
+				{ID: "ringing", ModemID: "modem-1", State: StateRinging},
+				{ID: "answering", ModemID: "modem-1", State: StateAnswering},
+				{ID: "early-media", ModemID: "modem-1", State: StateEarlyMedia},
+				{ID: "active", ModemID: "modem-1", State: StateActive},
+				{ID: "confirmed", ModemID: "modem-1", State: StateConfirmed},
+				{ID: "ending", ModemID: "modem-1", State: StateEnding},
+				{ID: "ended", ModemID: "modem-1", State: StateEnded},
+				{ID: "failed", ModemID: "modem-1", State: StateFailed},
+				{ID: "other", ModemID: "modem-2", State: StateActive},
 			},
 			want: []string{"dialing", "ringing", "answering", "early-media", "active", "confirmed", "ending"},
 		},
 		{
 			name: "empty",
 			calls: []storage.Call{
-				{ID: "ended", ModemID: "modem-1", State: procall.StateEnded},
+				{ID: "ended", ModemID: "modem-1", State: StateEnded},
 			},
 			want: []string{},
 		},

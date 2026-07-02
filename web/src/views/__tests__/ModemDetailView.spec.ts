@@ -3,6 +3,7 @@ import type { ComputedRef, Ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Modem } from '@/types/modem'
+import type { SEsResponse } from '@/types/se'
 import ModemDetailView from '@/views/ModemDetailView.vue'
 
 const api = vi.hoisted(() => ({
@@ -15,6 +16,8 @@ const routeHarness = vi.hoisted(() => ({
 
 const detailHarness = vi.hoisted(() => ({
   modem: undefined as Ref<Modem | null> | undefined,
+  seInfo: undefined as Ref<SEsResponse | null> | undefined,
+  isSELoading: undefined as Ref<boolean> | undefined,
   fetchModemDetail: vi.fn(),
   fetchEsimProfiles: vi.fn(),
   resetMsisdnInput: vi.fn(),
@@ -78,16 +81,20 @@ vi.mock('@/composables/useCapabilities', () => ({
 vi.mock('@/composables/useModemDetail', async () => {
   const { computed, ref } = await vi.importActual<typeof import('vue')>('vue')
   detailHarness.modem = ref(null)
+  detailHarness.seInfo = ref(null)
+  detailHarness.isSELoading = ref(false)
   return {
     useModemDetail: () => ({
       modem: detailHarness.modem,
-      euicc: ref(null),
+      seInfo: detailHarness.seInfo,
       esimProfiles: ref([]),
       isLoading: ref(false),
+      isSELoading: detailHarness.isSELoading,
       isEsimProfilesLoading: ref(false),
       isPhysicalModem: computed(() => Boolean(detailHarness.modem?.value?.supportsEsim === false)),
       isEsimModem: computed(() => Boolean(detailHarness.modem?.value?.supportsEsim)),
       fetchModemDetail: detailHarness.fetchModemDetail,
+      fetchSEs: vi.fn(),
       fetchEsimProfiles: detailHarness.fetchEsimProfiles,
     }),
   }
@@ -235,7 +242,10 @@ const mountView = () =>
             '<section data-testid="esim-profiles"><button data-testid="edit-msisdn" type="button" @click="$emit(\'edit-phone-number\', {})">edit</button></section>',
         },
         DraggableFab: {
-          template: '<button data-testid="install-esim"><slot /></button>',
+          props: ['disabled'],
+          emits: ['click'],
+          template:
+            '<button data-testid="install-esim" :disabled="disabled" @click="!disabled && $emit(\'click\')"><slot /></button>',
         },
         EsimInstallDialog: true,
         EsimTransferDialog: true,
@@ -252,6 +262,7 @@ const mountView = () =>
         },
         Dialog: { template: '<div><slot /></div>' },
         DialogContent: { template: '<div><slot /></div>' },
+        DialogDescription: { template: '<p><slot /></p>' },
         DialogHeader: { template: '<div><slot /></div>' },
         DialogTitle: { template: '<div><slot /></div>' },
         ScrollArea: { template: '<div><slot /></div>' },
@@ -297,6 +308,12 @@ describe('ModemDetailView SIM PIN unlock', () => {
     detailHarness.wifiCallingSettingsEnabled = undefined
     if (detailHarness.modem) {
       detailHarness.modem.value = lockedModem()
+    }
+    if (detailHarness.seInfo) {
+      detailHarness.seInfo.value = null
+    }
+    if (detailHarness.isSELoading) {
+      detailHarness.isSELoading.value = false
     }
   })
 
@@ -365,6 +382,32 @@ describe('ModemDetailView SIM PIN unlock', () => {
     expect(wrapper.find('[data-testid="pin-dialog"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="esim-profiles"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="install-esim"]').exists()).toBe(true)
+  })
+
+  it('disables eSIM install until SE info is loaded', async () => {
+    if (detailHarness.modem) {
+      detailHarness.modem.value = lockedModem(true)
+    }
+    if (detailHarness.isSELoading) {
+      detailHarness.isSELoading.value = true
+    }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="install-esim"]').attributes('disabled')).toBeDefined()
+
+    if (detailHarness.isSELoading) {
+      detailHarness.isSELoading.value = false
+    }
+    if (detailHarness.seInfo) {
+      detailHarness.seInfo.value = {
+        ses: [{ id: 'default', label: 'eUICC', eid: 'eid-1' }],
+      }
+    }
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="install-esim"]').attributes('disabled')).toBeUndefined()
   })
 
   it('updates the line number from the eSIM profile shortcut', async () => {

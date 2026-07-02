@@ -4,11 +4,13 @@ import { useI18n } from 'vue-i18n'
 
 import HomeHeader from '@/components/home/HomeHeader.vue'
 import HomeModemList from '@/components/home/HomeModemList.vue'
+import { useAppInfo } from '@/composables/useAppInfo'
 import { useModems } from '@/composables/useModems'
 import type { HomeModemItem } from '@/types/home'
 
 const { t } = useI18n()
 
+const { version, fetchAppInfo } = useAppInfo()
 const { modems, isLoading, fetchModems } = useModems()
 
 const modemCount = computed(() => modems.value.length)
@@ -36,6 +38,7 @@ const handleRefresh = () => {
 }
 
 onMounted(() => {
+  void fetchAppInfo()
   void fetchModems()
 })
 </script>
@@ -43,7 +46,7 @@ onMounted(() => {
 <template>
   <div class="min-h-dvh bg-background">
     <div class="mx-auto flex w-full max-w-7xl flex-col gap-5 px-6 py-10 lg:px-8">
-      <HomeHeader :subtitle="subtitle" :is-loading="isLoading" @refresh="handleRefresh" />
+      <HomeHeader :subtitle="subtitle" :version="version" :is-loading="isLoading" @refresh="handleRefresh" />
 
       <HomeModemList :items="modemItems" :is-loading="isLoading" />
     </div>

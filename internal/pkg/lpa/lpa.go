@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"sync"
 
 	"github.com/damonto/euicc-go/bertlv"
@@ -45,6 +46,7 @@ type ChannelConfig struct {
 	LockKey  string
 	ConfigID string
 	Channel  driver.SmartCardChannel
+	AID      []byte
 	Settings *settings.Settings
 	Logger   *slog.Logger
 }
@@ -61,6 +63,14 @@ var AIDs = [][]byte{
 }
 
 func New(m *modem.Modem, currentSettings *settings.Settings) (*LPA, error) {
+	return newForAID(m, currentSettings, nil)
+}
+
+func NewWithAID(m *modem.Modem, currentSettings *settings.Settings, aid []byte) (*LPA, error) {
+	return newForAID(m, currentSettings, aid)
+}
+
+func newForAID(m *modem.Modem, currentSettings *settings.Settings, aid []byte) (*LPA, error) {
 	gmu.Lock(m.EquipmentIdentifier)
 	ch, err := createChannel(m)
 	if err != nil {
@@ -71,11 +81,14 @@ func New(m *modem.Modem, currentSettings *settings.Settings) (*LPA, error) {
 		LockKey:  m.EquipmentIdentifier,
 		ConfigID: m.EquipmentIdentifier,
 		Channel:  ch,
+		AID:      aid,
 		Settings: currentSettings,
 		Logger:   m.Logger(),
 	})
 	if err != nil {
-		_ = ch.Disconnect()
+		if disconnectErr := ch.Disconnect(); disconnectErr != nil {
+			m.Logger().Debug("disconnect LPA channel after client creation failure", "error", disconnectErr)
+		}
 		gmu.Unlock(m.EquipmentIdentifier)
 		return nil, err
 	}
@@ -94,7 +107,9 @@ func NewWithChannel(cfg ChannelConfig) (*LPA, error) {
 		if cfg.LockKey != "" {
 			gmu.Unlock(cfg.LockKey)
 		}
-		_ = cfg.Channel.Disconnect()
+		if disconnectErr := cfg.Channel.Disconnect(); disconnectErr != nil && cfg.Logger != nil {
+			cfg.Logger.Debug("disconnect LPA channel after client creation failure", "error", disconnectErr)
+		}
 		return nil, err
 	}
 	return instance, nil
@@ -152,6 +167,17 @@ func newWithChannelLocked(cfg ChannelConfig) (*LPA, error) {
 		Logger:               logger,
 		MSS:                  currentSettings.FindModem(cfg.ConfigID).MSS,
 	}
+	if len(cfg.AID) > 0 {
+		opts.AID = slices.Clone(cfg.AID)
+		client, err := lpa.New(opts)
+		if err != nil {
+			logger.Warn("failed to create LPA client", "AID", fmt.Sprintf("%X", opts.AID), "error", err)
+			return nil, errors.Join(ErrNoSupportedAID, fmt.Errorf("open AID %X: %w", opts.AID, err))
+		}
+		instance.Client = client
+		logger.Info("LPA client created", "AID", fmt.Sprintf("%X", opts.AID))
+		return instance, nil
+	}
 	if err := instance.tryCreateClient(opts); err != nil {
 		return nil, err
 	}
@@ -159,16 +185,18 @@ func newWithChannelLocked(cfg ChannelConfig) (*LPA, error) {
 }
 
 func (l *LPA) tryCreateClient(opts *lpa.Options) error {
-	var err error
+	var errs error
 	for _, opts.AID = range AIDs {
+		var err error
 		l.Client, err = lpa.New(opts)
 		if err == nil {
 			l.logger.Info("LPA client created", "AID", fmt.Sprintf("%X", opts.AID))
 			return nil
 		}
 		l.logger.Warn("failed to create LPA client", "AID", fmt.Sprintf("%X", opts.AID), "error", err)
+		errs = errors.Join(errs, fmt.Errorf("open AID %X: %w", opts.AID, err))
 	}
-	return ErrNoSupportedAID
+	return errors.Join(ErrNoSupportedAID, errs)
 }
 
 func createChannel(m *modem.Modem) (driver.SmartCardChannel, error) {

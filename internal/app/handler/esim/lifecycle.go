@@ -25,6 +25,7 @@ type lifecycle struct {
 type enableSession struct {
 	l       *lifecycle
 	modem   *mmodem.Modem
+	seID    string
 	iccid   sgp22.ICCID
 	client  lifecycleClient
 	lastSeq sgp22.SequenceNumber
@@ -39,7 +40,7 @@ type lifecycleClient interface {
 	Close() error
 }
 
-type lifecycleClientFactory func(*mmodem.Modem, *settings.Settings) (lifecycleClient, error)
+type lifecycleClientFactory func(*mmodem.Modem, *settings.Settings, string) (lifecycleClient, error)
 
 var (
 	errActiveProfileCannotDelete = errors.New("active profile cannot be deleted")
@@ -55,8 +56,12 @@ func newLifecycle(store *settings.Store, registry *mmodem.Registry) *lifecycle {
 	}
 }
 
-func newLifecycleClient(modem *mmodem.Modem, currentSettings *settings.Settings) (lifecycleClient, error) {
-	return lpa.New(modem, currentSettings)
+func newLifecycleClient(modem *mmodem.Modem, currentSettings *settings.Settings, seID string) (lifecycleClient, error) {
+	se, err := lpa.ResolveSE(modem, seID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve eUICC SE: %w", err)
+	}
+	return lpa.NewWithAID(modem, currentSettings, se.AID)
 }
 
 func (l *lifecycle) settingsSnapshot() *settings.Settings {
@@ -70,15 +75,16 @@ func (l *lifecycle) settingsSnapshot() *settings.Settings {
 	return settings.Default()
 }
 
-func (l *lifecycle) PrepareEnable(modem *mmodem.Modem, iccid sgp22.ICCID) (*enableSession, error) {
+func (l *lifecycle) PrepareEnable(modem *mmodem.Modem, seID string, iccid sgp22.ICCID) (*enableSession, error) {
 	currentSettings := l.settingsSnapshot()
-	client, err := l.newClient(modem, currentSettings)
+	client, err := l.newClient(modem, currentSettings, seID)
 	if err != nil {
 		return nil, fmt.Errorf("create LPA client: %w", err)
 	}
 	session := &enableSession{
 		l:      l,
 		modem:  modem,
+		seID:   seID,
 		iccid:  iccid,
 		client: client,
 	}
@@ -132,7 +138,7 @@ func (s *enableSession) finish(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("wait for modem readiness: %w", err)
 	}
-	if err := s.l.sendPendingNotifications(target, s.lastSeq); err != nil {
+	if err := s.l.sendPendingNotifications(target, s.seID, s.lastSeq); err != nil {
 		slog.Warn("failed to handle modem notifications", "error", err, "imei", s.modem.EquipmentIdentifier)
 	}
 	return nil
@@ -148,9 +154,9 @@ func (s *enableSession) Close() {
 	s.client = nil
 }
 
-func (l *lifecycle) Delete(modem *mmodem.Modem, iccid sgp22.ICCID) error {
+func (l *lifecycle) Delete(modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
 	currentSettings := l.settingsSnapshot()
-	client, err := l.newClient(modem, currentSettings)
+	client, err := l.newClient(modem, currentSettings, seID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}
@@ -191,9 +197,9 @@ func profileByICCID(profiles []*sgp22.ProfileInfo, iccid sgp22.ICCID) (*sgp22.Pr
 	return nil, false
 }
 
-func (l *lifecycle) sendPendingNotifications(modem *mmodem.Modem, lastSeq sgp22.SequenceNumber) error {
+func (l *lifecycle) sendPendingNotifications(modem *mmodem.Modem, seID string, lastSeq sgp22.SequenceNumber) error {
 	currentSettings := l.settingsSnapshot()
-	client, err := l.newClient(modem, currentSettings)
+	client, err := l.newClient(modem, currentSettings, seID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

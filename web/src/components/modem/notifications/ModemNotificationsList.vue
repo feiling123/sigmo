@@ -20,21 +20,45 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const hasItems = computed(() => props.items.length > 0)
+const hasMultipleSEs = computed(() => new Set(props.items.map((item) => item.seId)).size > 1)
+const itemGroups = computed(() => {
+  const groups = new Map<
+    string,
+    { id: string; label: string; eid?: string; items: NotificationItem[] }
+  >()
+  for (const item of props.items) {
+    if (!groups.has(item.seId)) {
+      groups.set(item.seId, {
+        id: item.seId,
+        label: item.seLabel,
+        eid: item.seEid,
+        items: [],
+      })
+    }
+    groups.get(item.seId)?.items.push(item)
+  }
+  return Array.from(groups.values())
+})
 </script>
 
 <template>
   <section class="space-y-3">
     <ModemNotificationsSkeletonList v-if="props.isLoading" />
 
-    <div v-else-if="hasItems" class="space-y-3">
-      <ModemNotificationsItem
-        v-for="item in props.items"
-        :key="item.key"
-        :item="item"
-        :is-resending="props.resendingSequence === item.sequenceNumber"
-        @resend="emit('resend', $event)"
-        @delete="emit('delete', $event)"
-      />
+    <div v-else-if="hasItems" class="space-y-4">
+      <div v-for="group in itemGroups" :key="group.id" class="space-y-3">
+        <p v-if="hasMultipleSEs" class="px-1 text-xs font-semibold text-muted-foreground">
+          {{ group.label }}: {{ group.eid || 'N/A' }}
+        </p>
+        <ModemNotificationsItem
+          v-for="item in group.items"
+          :key="item.key"
+          :item="item"
+          :is-resending="props.resendingSequence === item.key"
+          @resend="emit('resend', $event)"
+          @delete="emit('delete', $event)"
+        />
+      </div>
     </div>
 
     <div

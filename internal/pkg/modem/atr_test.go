@@ -103,7 +103,37 @@ func TestATRSupportsEUICC(t *testing.T) {
 	}
 }
 
-func TestSupportsEUICCQMI(t *testing.T) {
+func TestSupportsEUICCUsesCachedATR(t *testing.T) {
+	tests := []struct {
+		name string
+		atr  []byte
+		want bool
+	}{
+		{name: "cached eUICC ATR", atr: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}, want: true},
+		{name: "cached known ESTKme ATR", atr: westkKnownATR, want: true},
+		{name: "ordinary cached ATR", atr: []byte{0x3B, 0x00}},
+		{name: "missing ATR"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			failOnATRTransports(t)
+			modem := testATRModem(ModemPortTypeQmi, ModemPort{
+				PortType: ModemPortTypeQmi,
+				Device:   "/dev/cdc-wdm0",
+			})
+			modem.Sim = &SIM{ATR: tt.atr}
+			got, err := SupportsEUICC(context.Background(), modem)
+			if err != nil {
+				t.Fatalf("SupportsEUICC() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("SupportsEUICC() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestATRReaderReadQMI(t *testing.T) {
 	tests := []struct {
 		name       string
 		modem      *Modem
@@ -226,24 +256,25 @@ func TestSupportsEUICCQMI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeQMIUIMReader{slotStatus: tt.status}
-			withQMIUIMReader(t, tt.modem.PrimaryPort, tt.wantSlot, reader, nil)
+			qmiReader := &fakeQMIUIMReader{slotStatus: tt.status}
+			atrReader := testQMIATRReader(t, tt.modem.PrimaryPort, tt.wantSlot, qmiReader, nil)
 
-			got, err := SupportsEUICC(context.Background(), tt.modem)
+			atr, err := atrReader.read(context.Background(), tt.modem)
 			if err != nil {
-				t.Fatalf("SupportsEUICC() error = %v", err)
+				t.Fatalf("atrReader.read() error = %v", err)
 			}
+			got := atrSupportsEUICC(atr)
 			if got != tt.want {
-				t.Fatalf("SupportsEUICC() = %v, want %v", got, tt.want)
+				t.Fatalf("atrSupportsEUICC(atrReader.read()) = %v, want %v", got, tt.want)
 			}
-			if tt.wantOpened && len(reader.calls) == 0 {
+			if tt.wantOpened && len(qmiReader.calls) == 0 {
 				t.Fatal("QMI reader was not opened")
 			}
 		})
 	}
 }
 
-func TestSupportsEUICCMBIM(t *testing.T) {
+func TestATRReaderReadMBIM(t *testing.T) {
 	tests := []struct {
 		name    string
 		atr     []byte
@@ -289,20 +320,21 @@ func TestSupportsEUICCMBIM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeMBIMATRReader{atr: tt.atr, atrErr: tt.atrErr}
-			withMBIMATRReader(t, reader, tt.openErr)
+			mbimReader := &fakeMBIMATRReader{atr: tt.atr, atrErr: tt.atrErr}
+			atrReader := testMBIMATRReader(mbimReader, tt.openErr)
 
-			got, err := SupportsEUICC(context.Background(), testATRModem(ModemPortTypeMbim, ModemPort{
+			atr, err := atrReader.read(context.Background(), testATRModem(ModemPortTypeMbim, ModemPort{
 				PortType: ModemPortTypeMbim,
 				Device:   "/dev/cdc-wdm0",
 			}))
 			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("SupportsEUICC() error = %v, want %v", err, tt.wantErr)
+				t.Fatalf("atrReader.read() error = %v, want %v", err, tt.wantErr)
 			}
+			got := atrSupportsEUICC(atr)
 			if got != tt.want {
-				t.Fatalf("SupportsEUICC() = %v, want %v", got, tt.want)
+				t.Fatalf("atrSupportsEUICC(atrReader.read()) = %v, want %v", got, tt.want)
 			}
-			if tt.openErr == nil && !reader.closed {
+			if tt.openErr == nil && !mbimReader.closed {
 				t.Fatal("MBIM reader was not closed")
 			}
 		})
@@ -355,37 +387,45 @@ func (r *fakeMBIMATRReader) Close() error {
 	return nil
 }
 
-func withMBIMATRReader(t *testing.T, reader mbimATRReader, openErr error) {
+func testQMIATRReader(t *testing.T, wantDevice string, wantSlot uint8, reader qmiUIMReader, openErr error) atrReader {
 	t.Helper()
-
-	old := openMBIMATRReader
-	openMBIMATRReader = func(context.Context, ...uiccmbim.Option) (mbimATRReader, error) {
-		if openErr != nil {
-			return nil, openErr
-		}
-		return reader, nil
+	return atrReader{
+		openQMI: func(_ context.Context, device string, slot uint8) (qmiUIMReader, error) {
+			if device != wantDevice {
+				t.Fatalf("open QMI device = %q, want %q", device, wantDevice)
+			}
+			if slot != wantSlot {
+				t.Fatalf("open QMI slot = %d, want %d", slot, wantSlot)
+			}
+			if openErr != nil {
+				return nil, openErr
+			}
+			return reader, nil
+		},
 	}
-	t.Cleanup(func() {
-		openMBIMATRReader = old
-	})
+}
+
+func testMBIMATRReader(reader mbimATRReader, openErr error) atrReader {
+	return atrReader{
+		openMBIM: func(context.Context, ...uiccmbim.Option) (mbimATRReader, error) {
+			if openErr != nil {
+				return nil, openErr
+			}
+			return reader, nil
+		},
+	}
 }
 
 func failOnATRTransports(t *testing.T) {
 	t.Helper()
 
 	oldQMI := openQMIUIMReader
-	oldMBIM := openMBIMATRReader
 	openQMIUIMReader = func(context.Context, string, uint8) (qmiUIMReader, error) {
 		t.Fatal("openQMIUIMReader called")
 		return nil, nil
 	}
-	openMBIMATRReader = func(context.Context, ...uiccmbim.Option) (mbimATRReader, error) {
-		t.Fatal("openMBIMATRReader called")
-		return nil, nil
-	}
 	t.Cleanup(func() {
 		openQMIUIMReader = oldQMI
-		openMBIMATRReader = oldMBIM
 	})
 }
 

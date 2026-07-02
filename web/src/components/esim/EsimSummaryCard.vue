@@ -6,12 +6,12 @@ import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { writeClipboardText } from '@/lib/clipboard'
-import type { EuiccApiResponse } from '@/types/euicc'
+import type { SEsResponse, SEItem } from '@/types/se'
 import type { Modem } from '@/types/modem'
 
 const props = defineProps<{
   modem: Modem
-  euicc: EuiccApiResponse | null
+  seInfo: SEsResponse | null
 }>()
 
 const { t } = useI18n()
@@ -20,20 +20,18 @@ const { t } = useI18n()
 const formatBytes = (bytes: number) => {
   if (bytes === 0) return '0 B'
   const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
+  const sizes = ['B', 'KiB', 'MiB', 'GiB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return `${Math.round((bytes / Math.pow(k, i)) * 100) / 100} ${sizes[i]}`
 }
 
-const storageRemaining = computed(() => {
-  return props.euicc ? formatBytes(props.euicc.freeSpace) : 'N/A'
-})
+const ses = computed<SEItem[]>(() => props.seInfo?.ses ?? [])
+const primarySE = computed(() => ses.value[0])
+const hasMultipleSEs = computed(() => ses.value.length > 1)
+const singleEid = computed(() => primarySE.value?.eid || 'N/A')
+const singleStorageRemaining = computed(() => formatBytes(primarySE.value?.freeSpace ?? 0))
 
-const eid = computed(() => {
-  return props.euicc?.eid || 'N/A'
-})
-
-type CopyField = 'imei' | 'eid'
+type CopyField = string
 
 const copiedField = ref<CopyField | ''>('')
 const copyTimer = ref<number>()
@@ -100,7 +98,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="flex items-start justify-between gap-3">
+      <div v-if="!hasMultipleSEs" class="flex items-start justify-between gap-3">
         <div class="flex min-w-0 shrink-0 items-center gap-2 pt-0.5">
           <FileText class="size-3 shrink-0 text-primary/70" />
           <span class="text-xs font-medium text-muted-foreground">
@@ -111,16 +109,16 @@ onUnmounted(() => {
           <span
             class="min-w-0 flex-1 break-all text-right font-mono text-xs font-medium leading-5 text-foreground"
           >
-            {{ eid }}
+            {{ singleEid }}
           </span>
           <Button
             size="icon-sm"
             variant="ghost"
             type="button"
             class="size-5 rounded-md text-muted-foreground hover:text-foreground"
-            :disabled="!canCopy(eid)"
+            :disabled="!canCopy(singleEid)"
             :title="t('modemDetail.actions.copy')"
-            @click="copyValue('eid', eid)"
+            @click="copyValue('eid', singleEid)"
           >
             <Check v-if="copiedField === 'eid'" class="size-3 text-emerald-500" />
             <Copy v-else class="size-3" />
@@ -129,7 +127,40 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="flex items-center justify-between gap-3">
+      <div v-else class="space-y-2">
+        <div
+          v-for="(item, index) in ses"
+          :key="`eid-${item.id}`"
+          class="flex items-start justify-between gap-3"
+        >
+          <div class="flex min-w-0 shrink-0 items-center gap-2 pt-0.5">
+            <FileText class="size-3 shrink-0 text-primary/70" />
+            <span class="text-xs font-medium text-muted-foreground">EID{{ index + 1 }}</span>
+          </div>
+          <div class="flex min-w-0 flex-1 items-start justify-end gap-1">
+            <span
+              class="min-w-0 flex-1 break-all text-right font-mono text-xs font-medium leading-5 text-foreground"
+            >
+              {{ item.eid || 'N/A' }}
+            </span>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              type="button"
+              class="size-5 rounded-md text-muted-foreground hover:text-foreground"
+              :disabled="!canCopy(item.eid || '')"
+              :title="t('modemDetail.actions.copy')"
+              @click="copyValue(`eid-${item.id}`, item.eid || '')"
+            >
+              <Check v-if="copiedField === `eid-${item.id}`" class="size-3 text-emerald-500" />
+              <Copy v-else class="size-3" />
+              <span class="sr-only">{{ t('modemDetail.actions.copy') }}</span>
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="!hasMultipleSEs" class="flex items-center justify-between gap-3">
         <div class="flex min-w-0 items-center gap-2">
           <Database class="size-3 shrink-0 text-primary/70" />
           <span class="text-xs font-medium text-muted-foreground">
@@ -137,8 +168,26 @@ onUnmounted(() => {
           </span>
         </div>
         <span class="shrink-0 text-xs font-semibold text-foreground">
-          {{ storageRemaining }}
+          {{ singleStorageRemaining }}
         </span>
+      </div>
+
+      <div v-else class="flex items-center justify-between gap-3">
+        <div class="flex min-w-0 items-center gap-2">
+          <Database class="size-3 shrink-0 text-primary/70" />
+          <span class="text-xs font-medium text-muted-foreground">
+            {{ t('modemDetail.fields.storageRemaining') }}
+          </span>
+        </div>
+        <div class="flex min-w-0 flex-wrap justify-end gap-x-2 gap-y-1 text-right">
+          <span
+            v-for="(item, index) in ses"
+            :key="`storage-${item.id}`"
+            class="text-xs font-semibold text-foreground"
+          >
+            SE{{ index + 1 }}: {{ formatBytes(item.freeSpace ?? 0) }}
+          </span>
+        </div>
       </div>
     </CardContent>
   </Card>

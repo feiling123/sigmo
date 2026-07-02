@@ -112,6 +112,9 @@ const simSlotStubs = {
   AlertDialogContent: {
     template: '<div><slot /></div>',
   },
+  AlertDialogDescription: {
+    template: '<p><slot /></p>',
+  },
   AlertDialogFooter: {
     template: '<div><slot /></div>',
   },

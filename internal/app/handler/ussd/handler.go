@@ -15,7 +15,7 @@ import (
 
 type Handler struct {
 	registry *mmodem.Registry
-	service  *pussd.Service
+	ussd     *pussd.Executor
 }
 
 const executeTimeout = time.Minute
@@ -34,7 +34,7 @@ var errExecuteTimeout = errors.New("ussd request timed out, please retry")
 func New(registry *mmodem.Registry, route pussd.Route) *Handler {
 	return &Handler{
 		registry: registry,
-		service:  pussd.New(route),
+		ussd:     pussd.New(route),
 	}
 }
 
@@ -74,7 +74,7 @@ func (h *Handler) Execute(c *echo.Context) error {
 }
 
 func (h *Handler) execute(ctx context.Context, modem *mmodem.Modem, req ExecuteRequest) (*ExecuteResponse, error) {
-	reply, err := h.service.Execute(ctx, modem, req.Action, req.Code)
+	reply, err := h.ussd.Execute(ctx, modem, req.Action, req.Code)
 	if err != nil {
 		return nil, err
 	}

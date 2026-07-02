@@ -5,9 +5,16 @@ type SASUPResponse struct {
 	Region string `json:"region,omitempty"`
 }
 
-type EuiccResponse struct {
-	EID          string        `json:"eid"`
-	FreeSpace    int32         `json:"freeSpace"`
-	SASUP        SASUPResponse `json:"sasUp"`
-	Certificates []string      `json:"certificates"`
+type SEsResponse struct {
+	SEs []SEItemResponse `json:"ses"`
+}
+
+type SEItemResponse struct {
+	ID           string        `json:"id"`
+	Label        string        `json:"label"`
+	AID          string        `json:"aid,omitempty"`
+	EID          string        `json:"eid,omitempty"`
+	FreeSpace    int32         `json:"freeSpace,omitempty"`
+	SASUP        SASUPResponse `json:"sasUp,omitempty"`
+	Certificates []string      `json:"certificates,omitempty"`
 }

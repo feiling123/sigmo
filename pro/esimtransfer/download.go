@@ -15,25 +15,25 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-func (s *Service) downloadEnableAndComplete(ctx context.Context, session *session, active *activeSession, result *ts43.Result, downloadConfig ts43.DownloadConfig) (*ts43.Result, error) {
-	iccid, err := s.downloadProfile(ctx, session, active.target, active.targetClient, downloadConfig)
+func (s *transferRunner) downloadAndCompleteActivation(ctx context.Context, session *wsSession, active *transferState, result *ts43.Result, downloadConfig ts43.DownloadConfig) (*ts43.Result, error) {
+	iccid, err := s.downloadProfile(ctx, session, active.target, active.targetLPA, downloadConfig)
 	active.CloseTarget()
 	if err != nil {
 		return result, err
 	}
-	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stageEnabling})
-	if err := s.enableTargetProfile(ctx, active.target, iccid); err != nil {
+	session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stageEnabling})
+	if err := s.enableTargetProfile(ctx, active.target, active.targetSEID, iccid); err != nil {
 		return result, err
 	}
-	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stageCompleting})
-	next, err := active.client.CompleteActivation(ctx, result, ts43.ActivationResult{ICCID: iccid.String()})
+	session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stageCompleting})
+	next, err := active.ts43Client.CompleteActivation(ctx, result, ts43.ActivationResult{ICCID: iccid.String()})
 	if err != nil {
 		active.Logger().Warn("complete TS.43 activation", "iccid", iccid.String(), "error", err)
 	}
 	return next, err
 }
 
-func (s *Service) downloadProfile(ctx context.Context, session *session, target *mmodem.Modem, client *ilpa.LPA, downloadConfig ts43.DownloadConfig) (sgp22.ICCID, error) {
+func (s *transferRunner) downloadProfile(ctx context.Context, session *wsSession, target *mmodem.Modem, targetLPA *ilpa.LPA, downloadConfig ts43.DownloadConfig) (sgp22.ICCID, error) {
 	ac, err := activationCode(downloadConfig)
 	if err != nil {
 		return nil, err
@@ -45,14 +45,14 @@ func (s *Service) downloadProfile(ctx context.Context, session *session, target 
 		}
 		ac.IMEI = imei
 	}
-	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stageDownloading})
-	result, err := client.DownloadProfile(ctx, ac, &elpa.DownloadOptions{
+	session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stageDownloading})
+	result, err := targetLPA.DownloadProfile(ctx, ac, &elpa.DownloadOptions{
 		OnProgress: func(stage elpa.DownloadStage) {
-			session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stage.String()})
+			session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stage.String()})
 		},
 		OnConfirm: func(info *sgp22.ProfileInfo) bool {
 			preview := profilePreviewFrom(info)
-			session.sendIfConnected(serverMessage{
+			session.sendIfConnected(wsServerMessage{
 				Type:    wsTypePreview,
 				Profile: &preview,
 			})
@@ -66,7 +66,7 @@ func (s *Service) downloadProfile(ctx context.Context, session *session, target 
 	if result != nil && result.Notification != nil {
 		iccid = result.Notification.ICCID
 		if result.Notification.SequenceNumber > 0 {
-			if err := client.SendNotification(result.Notification.SequenceNumber, false); err != nil {
+			if err := targetLPA.SendNotification(result.Notification.SequenceNumber, false); err != nil {
 				return nil, fmt.Errorf("send install notification: %w", err)
 			}
 		}
@@ -84,11 +84,11 @@ func (s *Service) downloadProfile(ctx context.Context, session *session, target 
 	return iccid, nil
 }
 
-func (s *Service) enableTargetProfile(ctx context.Context, target *mmodem.Modem, iccid sgp22.ICCID) error {
+func (s *transferRunner) enableTargetProfile(ctx context.Context, target *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
 	if s.enableProfile == nil {
 		return errors.New("enable profile dependency is missing")
 	}
-	return s.enableProfile(ctx, target, iccid)
+	return s.enableProfile(ctx, target, seID, iccid)
 }
 
 func activationCode(downloadConfig ts43.DownloadConfig) (*elpa.ActivationCode, error) {

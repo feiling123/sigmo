@@ -12,40 +12,40 @@ export const useEsimApi = () => {
     return fetchJson<EsimProfilesResponse>(`modems/${id}/esims`)
   }
 
-  const discoverEsims = (id: string) => {
-    return fetchJson<EsimDiscoverResponse>(`modems/${id}/esim-discoveries`, {
+  const discoverEsims = (id: string, seId: string) => {
+    return fetchJson<EsimDiscoverResponse>(`modems/${id}/ses/${seId}/esim-discoveries`, {
       method: 'POST',
     })
   }
 
-  const updateEsimNickname = (id: string, iccid: string, nickname: string) => {
-    return fetchJson<void>(`modems/${id}/esims/${iccid}/nickname`, {
+  const updateEsimNickname = (id: string, seId: string, iccid: string, nickname: string) => {
+    return fetchJson<void>(`modems/${id}/ses/${seId}/esims/${iccid}/nickname`, {
       method: 'PUT',
       body: JSON.stringify({ nickname }),
     })
   }
 
-  const enableEsim = (id: string, iccid: string) => {
-    return fetchJson<void>(`modems/${id}/esims/${iccid}/activation`, {
+  const enableEsim = (id: string, seId: string, iccid: string) => {
+    return fetchJson<void>(`modems/${id}/ses/${seId}/esims/${iccid}/activation`, {
       method: 'PUT',
     })
   }
 
-  const deleteEsim = (id: string, iccid: string) => {
-    return fetchJson<void>(`modems/${id}/esims/${iccid}`, {
+  const deleteEsim = (id: string, seId: string, iccid: string) => {
+    return fetchJson<void>(`modems/${id}/ses/${seId}/esims/${iccid}`, {
       method: 'DELETE',
     })
   }
 
   const getTransferSources = (id: string) => {
-    return fetchJson<EsimTransferSourcesResponse>(`modems/${id}/esim-transfer-sources`)
+    return fetchJson<EsimTransferSourcesResponse>(`modems/${id}/esim-transfers/sources`)
   }
 
   const getTransferProfiles = (
     id: string,
     payload: { sourceType: string; sourceId: string; sourceImei?: string },
   ) => {
-    return fetchJson<EsimTransferProfile[]>(`modems/${id}/esim-transfer-profile-queries`, {
+    return fetchJson<EsimTransferProfile[]>(`modems/${id}/esim-transfers/source-profiles`, {
       method: 'POST',
       body: JSON.stringify(payload),
     })

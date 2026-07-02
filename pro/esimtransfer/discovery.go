@@ -22,7 +22,7 @@ func smdsDiscoveryEventFromDelayedDownload(event ts43.DelayedDownloadEvent) ts43
 	}
 }
 
-func smdsDownloadConfig(ctx context.Context, client *ilpa.LPA, event ts43.SMDSDiscoveryEvent) (ts43.DownloadConfig, error) {
+func smdsDownloadConfig(ctx context.Context, targetLPA *ilpa.LPA, event ts43.SMDSDiscoveryEvent) (ts43.DownloadConfig, error) {
 	if err := ctx.Err(); err != nil {
 		return ts43.DownloadConfig{}, err
 	}
@@ -34,7 +34,7 @@ func smdsDownloadConfig(ctx context.Context, client *ilpa.LPA, event ts43.SMDSDi
 	if err != nil {
 		return ts43.DownloadConfig{}, fmt.Errorf("parse target IMEI: %w", err)
 	}
-	entries, err := client.Discovery(imei)
+	entries, err := targetLPA.Discovery(imei)
 	if err != nil {
 		return ts43.DownloadConfig{}, fmt.Errorf("discover SM-DS profiles: %w", err)
 	}

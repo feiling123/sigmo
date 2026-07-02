@@ -7,7 +7,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-type Service struct {
+type Executor struct {
 	session *session
 	route   Route
 }
@@ -34,18 +34,18 @@ type realModemDevice struct {
 
 var ErrRouteUnavailable = errors.New("ussd route is unavailable")
 
-func New(route Route) *Service {
-	return &Service{
+func New(route Route) *Executor {
+	return &Executor{
 		session: newSession(),
 		route:   route,
 	}
 }
 
-func (s *Service) Execute(ctx context.Context, modem *mmodem.Modem, action string, code string) (string, error) {
+func (s *Executor) Execute(ctx context.Context, modem *mmodem.Modem, action string, code string) (string, error) {
 	return s.execute(ctx, realModemDevice{modemRef: modem, session: s.session}, action, code)
 }
 
-func (s *Service) execute(ctx context.Context, device modemDevice, action string, code string) (string, error) {
+func (s *Executor) execute(ctx context.Context, device modemDevice, action string, code string) (string, error) {
 	status, err := s.routeStatus(ctx, device.modem())
 	if err != nil {
 		return "", err
@@ -66,7 +66,7 @@ func (s *Service) execute(ctx context.Context, device modemDevice, action string
 	return "", err
 }
 
-func (s *Service) routeStatus(ctx context.Context, modem *mmodem.Modem) (RouteStatus, error) {
+func (s *Executor) routeStatus(ctx context.Context, modem *mmodem.Modem) (RouteStatus, error) {
 	if s.route == nil {
 		return RouteStatus{}, nil
 	}
